@@ -23,9 +23,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
-
-      - name: Make Gradle executable
-        run: chmod +x ./gradlew
+        with:
+          gradle-version: '9.3.1'
 
       - name: Create debug keystore
         run: |
@@ -41,7 +40,7 @@ jobs:
             -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
