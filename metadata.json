@@ -1,0 +1,6 @@
+{
+  "name": "حسابات المحل",
+  "description": "نظام مبسط لإدارة ديون الزبائن والمشتريات والمدفوعات والنسخ الاحتياطي والتقارير PDF باللغتين العربية والإنجليزية وبعملة الشيكل ₪",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
