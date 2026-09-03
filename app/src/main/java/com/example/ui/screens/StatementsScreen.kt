@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Clear
@@ -30,9 +32,12 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -71,6 +76,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.core.model.Money
+import com.example.core.model.Customer
 import com.example.core.model.TransactionStatus
 import com.example.core.model.TransactionType
 import com.example.core.model.TransactionWithDetails
@@ -82,6 +89,7 @@ import com.example.ui.components.AppHeader
 import com.example.ui.components.CancelTransactionDialog
 import com.example.ui.components.RestoreTransactionDialog
 import com.example.ui.components.StatusBadge
+import com.example.ui.screens.analysis.AnalysisCenterContent
 import com.example.ui.theme.LocalAppThemeColors
 import com.example.ui.theme.FinancialCancelled
 import com.example.ui.theme.FinancialCancelledContainer
@@ -107,6 +115,9 @@ fun StatementsScreen(
     val selectedCustomer by viewModel.selectedStatementCustomer.collectAsStateWithLifecycle()
     val financialMetrics by viewModel.statementFinancialMetrics.collectAsStateWithLifecycle()
     val allActiveCustomersWithDebt by viewModel.activeCustomersWithDebt.collectAsStateWithLifecycle()
+    val selectedTab by viewModel.selectedAnalysisTab.collectAsStateWithLifecycle()
+    val isNewestFirst by viewModel.isStatementNewestFirst.collectAsStateWithLifecycle()
+    val runningBalances by viewModel.statementRunningBalances.collectAsStateWithLifecycle()
 
     var cancelTargetTxId by remember { mutableStateOf<Long?>(null) }
     var restoreTargetTxId by remember { mutableStateOf<Long?>(null) }
@@ -157,10 +168,102 @@ fun StatementsScreen(
                 }
             )
 
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 100.dp)
+            // Customer Context Banner (Whole Shop vs Specific Customer)
+            CustomerContextBanner(
+                selectedCustomer = selectedCustomer,
+                onClearCustomer = {
+                    viewModel.setSelectedStatementCustomer(null)
+                    viewModel.setStatementSearchQuery("")
+                },
+                onSelectCustomerClick = {
+                    isCustomerDropdownExpanded = true
+                }
+            )
+
+            // Segmented Tab Switcher (Analysis Center vs Account Statement)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(4.dp)
             ) {
+                // Tab 1: Analysis Center
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { viewModel.setSelectedAnalysisTab(ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) }
+                        .testTag("tab_analysis_center"),
+                    color = if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) themeColors.primary else Color.Transparent,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Assessment,
+                            contentDescription = null,
+                            tint = if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = strings.tabAnalysisCenter,
+                            fontSize = 13.sp,
+                            fontWeight = if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Tab 2: Account Statement
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { viewModel.setSelectedAnalysisTab(ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT) }
+                        .testTag("tab_account_statement"),
+                    color = if (selectedTab == ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT) themeColors.primary else Color.Transparent,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ReceiptLong,
+                            contentDescription = null,
+                            tint = if (selectedTab == ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = strings.tabAccountStatement,
+                            fontSize = 13.sp,
+                            fontWeight = if (selectedTab == ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selectedTab == ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) {
+                AnalysisCenterContent(
+                    viewModel = viewModel,
+                    selectedCustomer = selectedCustomer
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 100.dp)
+                ) {
                 // Section 1: Customer Search & Selector
                 item {
                     Column(
@@ -556,6 +659,51 @@ fun StatementsScreen(
                     }
                 }
 
+                // Section 3.5: Sort Order Switcher
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${transactionsWithDetails.size} ${strings.allTransactions}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { viewModel.setStatementSortOrder(!isNewestFirst) }
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                .testTag("sort_order_toggle"),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SwapVert,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = themeColors.primary
+                                )
+                                Text(
+                                    text = if (isNewestFirst) strings.orderNewestFirst else strings.orderOldestFirst,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = themeColors.primary
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Section 4: Transaction History List
                 if (transactionsWithDetails.isEmpty()) {
                     item {
@@ -590,8 +738,10 @@ fun StatementsScreen(
                     }
                 } else {
                     items(transactionsWithDetails, key = { it.transaction.id }) { item ->
+                        val txRunningBalance = runningBalances[item.transaction.id]
                         StatementTransactionCard(
                             item = item,
+                            runningBalance = txRunningBalance,
                             onMoreDetailsClick = { selectedDetailsTx = item },
                             onCustomerClick = {
                                 item.customer?.let { c ->
@@ -604,6 +754,7 @@ fun StatementsScreen(
             }
         }
     }
+}
 
     // Modal Sheet: Transaction "More Details"
     selectedDetailsTx?.let { txDetails ->
@@ -736,6 +887,7 @@ private fun FinancialMetricCard(
 @Composable
 fun StatementTransactionCard(
     item: TransactionWithDetails,
+    runningBalance: Money? = null,
     onMoreDetailsClick: () -> Unit,
     onCustomerClick: () -> Unit
 ) {
@@ -854,7 +1006,7 @@ fun StatementTransactionCard(
                     }
                 }
 
-                // Right Amount + More Details Action
+                // Right Amount + Running Balance + More Details Action
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = item.transaction.totalAmount.format(),
@@ -863,6 +1015,22 @@ fun StatementTransactionCard(
                         color = if (isCancelled) Color.Gray else typeColor,
                         style = if (isCancelled) MaterialTheme.typography.bodyLarge.copy(textDecoration = TextDecoration.LineThrough) else MaterialTheme.typography.bodyLarge
                     )
+
+                    if (runningBalance != null && !isCancelled) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (runningBalance.isPositive()) FinancialDebt.copy(alpha = 0.1f) else FinancialPayment.copy(alpha = 0.1f)
+                        ) {
+                            Text(
+                                text = "${strings.runningBalanceLabel}: ${runningBalance.format()}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (runningBalance.isPositive()) FinancialDebt else FinancialPayment,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(4.dp))
 
@@ -1228,3 +1396,132 @@ private data class StatementCardStyle(
     val containerColor: Color,
     val icon: ImageVector
 )
+
+@Composable
+fun CustomerContextBanner(
+    selectedCustomer: Customer?,
+    onClearCustomer: () -> Unit,
+    onSelectCustomerClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val strings = LocalStrings.current
+    val themeColors = LocalAppThemeColors.current
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selectedCustomer != null) themeColors.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selectedCustomer != null) themeColors.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(if (selectedCustomer != null) themeColors.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (selectedCustomer != null) Icons.Default.Person else Icons.Default.Storefront,
+                        contentDescription = null,
+                        tint = if (selectedCustomer != null) Color.White else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                Column {
+                    Text(
+                        text = if (selectedCustomer != null) {
+                            "وضع العرض: زبون محدد"
+                        } else {
+                            "وضع العرض: المحل بالكامل"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = if (selectedCustomer != null) {
+                            selectedCustomer.name
+                        } else {
+                            "كافة الزبائن والعمليات"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedCustomer != null) themeColors.primary else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            if (selectedCustomer != null) {
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onClearCustomer() }
+                        .testTag("clear_customer_context_btn"),
+                    color = themeColors.primary.copy(alpha = 0.12f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = null,
+                            tint = themeColors.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = strings.switchToWholeShop,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = themeColors.primary
+                        )
+                    }
+                }
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onSelectCustomerClick() }
+                        .testTag("select_customer_context_btn"),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = themeColors.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "تحديد زبون",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = themeColors.primary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

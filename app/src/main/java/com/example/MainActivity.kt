@@ -42,6 +42,8 @@ import com.example.ui.components.FloatingCurvedBottomBar
 import com.example.ui.components.LoadingDialog
 import com.example.ui.components.NotificationsSheet
 import com.example.ui.components.QuickActionBottomSheet
+import com.example.ui.components.QuickPaymentDialog
+import com.example.ui.components.QuickPaymentSuccessDialog
 import com.example.ui.components.ThemedGlobalDrawer
 import com.example.ui.screens.CustomerDetailsScreen
 import com.example.ui.screens.DatabaseScreen
@@ -96,6 +98,8 @@ fun MainAppContent(viewModel: ShopViewModel) {
     val currentDestination by viewModel.currentDestination.collectAsStateWithLifecycle()
     val selectedCustomerId by viewModel.selectedCustomerIdForDetails.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val showQuickPaymentDialog by viewModel.showQuickPaymentDialog.collectAsStateWithLifecycle()
+    val quickPaymentSuccessData by viewModel.quickPaymentSuccessData.collectAsStateWithLifecycle()
     val strings = LocalStrings.current
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -204,8 +208,22 @@ fun MainAppContent(viewModel: ShopViewModel) {
                             viewModel.openPurchasesDirectly()
                         },
                         onQuickPayment = {
-                            viewModel.navigateTo(ScreenDestination.DATABASE)
+                            viewModel.openQuickPayment(null)
                         }
+                    )
+                }
+
+                if (showQuickPaymentDialog) {
+                    QuickPaymentDialog(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.closeQuickPayment() }
+                    )
+                }
+
+                quickPaymentSuccessData?.let { data ->
+                    QuickPaymentSuccessDialog(
+                        data = data,
+                        onDismiss = { viewModel.dismissQuickPaymentSuccess() }
                     )
                 }
             }

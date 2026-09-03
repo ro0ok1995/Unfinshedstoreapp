@@ -60,14 +60,15 @@ interface TransactionRepository {
     fun getItemsForTransaction(transactionId: Long): Flow<List<TransactionItem>>
 
     /**
-     * Atomically creates a purchase (Credit or Cash) with snapshots of items.
+     * Atomically creates a purchase (Credit, Cash, or Partial) with snapshots of items.
      * Rollback automatically if any step fails.
      */
     suspend fun createPurchase(
         customerId: Long?,
         isCredit: Boolean,
         cartItems: List<CartItem>,
-        note: String
+        note: String,
+        paidAmount: Money = Money.ZERO
     ): Result<Long>
 
     /**

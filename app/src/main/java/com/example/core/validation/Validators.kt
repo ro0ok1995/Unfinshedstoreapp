@@ -154,4 +154,26 @@ object TransactionValidator {
         }
         return ValidationResult.Valid
     }
+
+    fun validatePartialPurchase(
+        customerId: Long?,
+        customerIsActive: Boolean,
+        cartItems: List<CartItem>,
+        paidAmount: Money,
+        totalAmount: Money
+    ): ValidationResult {
+        val creditValidation = validateCreditPurchase(customerId, customerIsActive, cartItems)
+        if (!creditValidation.isValid) return creditValidation
+
+        if (!paidAmount.isPositive()) {
+            return ValidationResult.Error("paid_amount_non_positive", "Partial cash payment must be greater than zero.")
+        }
+        if (paidAmount >= totalAmount) {
+            return ValidationResult.Error(
+                "paid_amount_exceeds_total",
+                "Partial cash payment cannot equal or exceed total purchase amount. Use full cash purchase instead."
+            )
+        }
+        return ValidationResult.Valid
+    }
 }

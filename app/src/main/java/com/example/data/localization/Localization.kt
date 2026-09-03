@@ -98,7 +98,40 @@ interface Strings {
     val periodToday: String
     val periodThisWeek: String
     val periodThisMonth: String
+    val periodCustom: String
     val periodAllTime: String
+    val selectDateRange: String
+    val startDateLabel: String
+    val endDateLabel: String
+    val tabAnalysisCenter: String
+    val tabAccountStatement: String
+    val sectionOverview: String
+    val sectionFinancialStats: String
+    val sectionCustomerDebt: String
+    val sectionCashPayments: String
+    val sectionTransactions: String
+    val sectionPeriodAnalysis: String
+    val totalSalesLabel: String
+    val cashSalesLabel: String
+    val creditSalesLabel: String
+    val paymentsCollectedLabel: String
+    val totalCustomersLabel: String
+    val activeCustomersLabel: String
+    val collectionRateLabel: String
+    val averageDebtLabel: String
+    val breakdownTitle: String
+    val salesVsPaymentsTitle: String
+    val debtOverviewTitle: String
+    val noChartData: String
+    val runningBalanceLabel: String
+    val orderNewestFirst: String
+    val orderOldestFirst: String
+    val viewingWholeShop: String
+    val viewingSpecificCustomer: String
+    val switchToWholeShop: String
+    val switchCustomer: String
+    val exportAnalysisSummary: String
+    val sortOrderLabel: String
     val homeStatsCredit: String
     val homeStatsCash: String
     val homeStatsPayments: String
@@ -170,6 +203,31 @@ interface Strings {
     val selectCustomerPrompt: String
     val changeCustomer: String
     val chooseCustomerDropdown: String
+
+    // Settlement Modes
+    val settlementMode: String
+    val settlementFullDebt: String
+    val settlementFullDebtDesc: String
+    val settlementFullCash: String
+    val settlementFullCashDesc: String
+    val settlementPartial: String
+    val settlementPartialDesc: String
+    val paidCashAmount: String
+    val remainingDebtAmount: String
+    val partialPaymentAmountPrompt: String
+    val partialPaymentInvalid: String
+
+    // Quick Payment
+    val quickPaymentTitle: String
+    val quickPayment: String
+    val quickPaymentSelectCustomer: String
+    val noDebtForCustomer: String
+    val balanceAfterPayment: String
+    val viewCustomerStatement: String
+    val quickPaymentSuccessTitle: String
+    val paymentSuccessTitle: String
+    val previousDebtLabel: String
+    val newDebtLabel: String
 
     // Payments
     val recordPaymentTitle: String
@@ -497,7 +555,40 @@ object ArabicStrings : Strings {
     override val periodToday = "اليوم"
     override val periodThisWeek = "هذا الأسبوع"
     override val periodThisMonth = "هذا الشهر"
+    override val periodCustom = "فترة مخصصة"
     override val periodAllTime = "كافة الفترات"
+    override val selectDateRange = "تحديد النطاق الزمني"
+    override val startDateLabel = "تاريخ البدء"
+    override val endDateLabel = "تاريخ الانتهاء"
+    override val tabAnalysisCenter = "مركز التحليل والإحصائيات"
+    override val tabAccountStatement = "كشف الحساب والسجلات"
+    override val sectionOverview = "نظرة عامة"
+    override val sectionFinancialStats = "الإحصائيات المالية"
+    override val sectionCustomerDebt = "ديون الزبائن"
+    override val sectionCashPayments = "السيولة النقدية والتحصيل"
+    override val sectionTransactions = "حركة المعاملات"
+    override val sectionPeriodAnalysis = "تحليل الفترة الزمنية"
+    override val totalSalesLabel = "إجمالي المبيعات"
+    override val cashSalesLabel = "المبيعات النقدية"
+    override val creditSalesLabel = "المبيعات الآجلة"
+    override val paymentsCollectedLabel = "الدفعات المحصلة"
+    override val totalCustomersLabel = "إجمالي الزبائن"
+    override val activeCustomersLabel = "الزبائن النشطون"
+    override val collectionRateLabel = "نسبة التحصيل"
+    override val averageDebtLabel = "متوسط الدين للزبون"
+    override val breakdownTitle = "توزيع العمليات والسيولة"
+    override val salesVsPaymentsTitle = "مقارنة المبيعات والدفعات"
+    override val debtOverviewTitle = "نظرة عامة على ديون المحل"
+    override val noChartData = "لا توجد عمليات مسجلة خلال هذه الفترة"
+    override val runningBalanceLabel = "الرصيد بعد الحركة"
+    override val orderNewestFirst = "الأحدث أولاً"
+    override val orderOldestFirst = "الأقدم أولاً"
+    override val viewingWholeShop = "المحل بالكامل"
+    override val viewingSpecificCustomer = "زبون محدد"
+    override val switchToWholeShop = "عرض المحل بالكامل"
+    override val switchCustomer = "تغيير الزبون"
+    override val exportAnalysisSummary = "تصدير ملخص التحليل"
+    override val sortOrderLabel = "الترتيب الزمني"
     override val homeStatsCredit = "ديون / آجل"
     override val homeStatsCash = "مبيعات كاش"
     override val homeStatsPayments = "سدادات مقبوضة"
@@ -567,6 +658,31 @@ object ArabicStrings : Strings {
     override val selectCustomerPrompt = "يرجى اختيار العميل أولاً."
     override val changeCustomer = "تغيير العميل"
     override val chooseCustomerDropdown = "[ اختر العميل ▼ ]"
+
+    // Settlement Modes
+    override val settlementMode = "طريقة السداد"
+    override val settlementFullDebt = "على الحساب (آجل كامل)"
+    override val settlementFullDebtDesc = "إضافة كامل المبلغ إلى ذمة الزبون"
+    override val settlementFullCash = "دفع كاش كامل"
+    override val settlementFullCashDesc = "استلام كامل المبلغ نقداً دون تسجيل أي دين"
+    override val settlementPartial = "دفع جزئي (نقد + آجل)"
+    override val settlementPartialDesc = "دفع جزء نقداً والباقي يُسجل كدين على الحساب"
+    override val paidCashAmount = "المبلغ المدفوع نقداً"
+    override val remainingDebtAmount = "المتبقي على الحساب (دين)"
+    override val partialPaymentAmountPrompt = "المبلغ المدفوع نقداً (₪) *"
+    override val partialPaymentInvalid = "المبلغ المدفوع نقداً يجب أن يكون أكبر من صفر وأقل من الإجمالي"
+
+    // Quick Payment
+    override val quickPaymentTitle = "دفع سريع"
+    override val quickPayment = "دفع سريع"
+    override val quickPaymentSelectCustomer = "اختر الزبون لتسجيل الدفعة"
+    override val noDebtForCustomer = "حساب هذا الزبون خالص بالكامل (لا يوجد دين مستحق)"
+    override val balanceAfterPayment = "الرصيد بعد السداد"
+    override val viewCustomerStatement = "عرض كشف الحساب"
+    override val quickPaymentSuccessTitle = "تم تسجيل الدفعة بنجاح!"
+    override val paymentSuccessTitle = "تم تسجيل الدفعة بنجاح!"
+    override val previousDebtLabel = "الدين السابق"
+    override val newDebtLabel = "الدين المتبقي الجديد"
 
     override val recordPaymentTitle = "تسجيل دفعة سداد دين"
     override val recordPayment = "تسجيل دفعة سداد"
@@ -890,7 +1006,40 @@ object EnglishStrings : Strings {
     override val periodToday = "Today"
     override val periodThisWeek = "This Week"
     override val periodThisMonth = "This Month"
+    override val periodCustom = "Custom Period"
     override val periodAllTime = "All Time"
+    override val selectDateRange = "Select Date Range"
+    override val startDateLabel = "Start Date"
+    override val endDateLabel = "End Date"
+    override val tabAnalysisCenter = "Analysis & Statistics"
+    override val tabAccountStatement = "Account Statement"
+    override val sectionOverview = "Overview"
+    override val sectionFinancialStats = "Financial Statistics"
+    override val sectionCustomerDebt = "Customer Debt"
+    override val sectionCashPayments = "Cash & Collections"
+    override val sectionTransactions = "Transactions Activity"
+    override val sectionPeriodAnalysis = "Period Analysis"
+    override val totalSalesLabel = "Total Sales"
+    override val cashSalesLabel = "Cash Sales"
+    override val creditSalesLabel = "Credit Sales"
+    override val paymentsCollectedLabel = "Collected Payments"
+    override val totalCustomersLabel = "Total Customers"
+    override val activeCustomersLabel = "Active Customers"
+    override val collectionRateLabel = "Collection Rate"
+    override val averageDebtLabel = "Average Debt"
+    override val breakdownTitle = "Operations Breakdown"
+    override val salesVsPaymentsTitle = "Sales vs Payments"
+    override val debtOverviewTitle = "Debt Overview"
+    override val noChartData = "No transactions recorded for this period"
+    override val runningBalanceLabel = "Running Balance"
+    override val orderNewestFirst = "Newest First"
+    override val orderOldestFirst = "Oldest First"
+    override val viewingWholeShop = "Whole Shop"
+    override val viewingSpecificCustomer = "Specific Customer"
+    override val switchToWholeShop = "View Whole Shop"
+    override val switchCustomer = "Change Customer"
+    override val exportAnalysisSummary = "Export Summary"
+    override val sortOrderLabel = "Sort Order"
     override val homeStatsCredit = "Credit / Debts"
     override val homeStatsCash = "Cash Sales"
     override val homeStatsPayments = "Collected Payments"
@@ -960,6 +1109,31 @@ object EnglishStrings : Strings {
     override val selectCustomerPrompt = "Please select a customer first."
     override val changeCustomer = "Change Customer"
     override val chooseCustomerDropdown = "[ Select Customer ▼ ]"
+
+    // Settlement Modes
+    override val settlementMode = "Settlement Method"
+    override val settlementFullDebt = "On Account (Full Debt)"
+    override val settlementFullDebtDesc = "Add entire amount to customer's outstanding balance"
+    override val settlementFullCash = "Full Cash Payment"
+    override val settlementFullCashDesc = "Receive entire amount in cash without creating debt"
+    override val settlementPartial = "Partial Payment (Cash + Debt)"
+    override val settlementPartialDesc = "Pay part in cash, add remaining balance to debt"
+    override val paidCashAmount = "Cash Paid Amount"
+    override val remainingDebtAmount = "Remaining Debt (On Account)"
+    override val partialPaymentAmountPrompt = "Cash Paid Amount (₪) *"
+    override val partialPaymentInvalid = "Cash payment must be greater than zero and less than total amount"
+
+    // Quick Payment
+    override val quickPaymentTitle = "Quick Payment"
+    override val quickPayment = "Quick Payment"
+    override val quickPaymentSelectCustomer = "Select Customer for Payment"
+    override val noDebtForCustomer = "Account is fully settled (no outstanding debt)"
+    override val balanceAfterPayment = "Balance After Payment"
+    override val viewCustomerStatement = "View Account Statement"
+    override val quickPaymentSuccessTitle = "Payment Recorded Successfully!"
+    override val paymentSuccessTitle = "Payment Recorded Successfully!"
+    override val previousDebtLabel = "Previous Debt"
+    override val newDebtLabel = "New Remaining Debt"
 
     override val recordPaymentTitle = "Record Customer Payment"
     override val recordPayment = "Record Payment"

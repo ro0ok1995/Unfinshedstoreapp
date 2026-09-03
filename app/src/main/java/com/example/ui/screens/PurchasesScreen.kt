@@ -81,6 +81,7 @@ import com.example.core.model.CartItem
 import com.example.core.model.Customer
 import com.example.core.model.Money
 import com.example.core.model.Product
+import com.example.core.model.SettlementMode
 import com.example.data.localization.LocalStrings
 import com.example.ui.components.AddEditCustomerDialog
 import com.example.ui.components.EditQuantityDialog
@@ -113,6 +114,9 @@ fun PurchasesScreen(
     val products by viewModel.activeProducts.collectAsStateWithLifecycle()
     val selectedCustomer by viewModel.selectedPurchaseCustomer.collectAsStateWithLifecycle()
     val isCredit by viewModel.isCreditPurchase.collectAsStateWithLifecycle()
+    val settlementMode by viewModel.selectedSettlementMode.collectAsStateWithLifecycle()
+    val partialCashAmount by viewModel.partialCashAmount.collectAsStateWithLifecycle()
+    val isSubmitting by viewModel.isSubmitting.collectAsStateWithLifecycle()
     val cartItems by viewModel.cartItems.collectAsStateWithLifecycle()
     val notes by viewModel.purchaseNotes.collectAsStateWithLifecycle()
 
@@ -480,17 +484,21 @@ fun PurchasesScreen(
             totalAmount = totalAmount,
             customers = customers,
             initialCustomer = selectedCustomer,
-            isCredit = isCredit,
+            settlementMode = settlementMode,
+            initialPartialPaid = partialCashAmount,
             notes = notes,
+            isSubmitting = isSubmitting,
             onCustomerChanged = { viewModel.setSelectedPurchaseCustomer(it) },
-            onIsCreditChanged = { viewModel.setIsCreditPurchase(it) },
+            onSettlementModeChanged = { viewModel.setSelectedSettlementMode(it) },
+            onPartialPaidChanged = { viewModel.setPartialCashAmount(it) },
             onNotesChanged = { viewModel.setPurchaseNotes(it) },
             onAddNewCustomer = { showAddCustomerDialog = true },
             onDismiss = { showReviewModal = false },
-            onConfirm = { confirmedCustomer, creditMode, confirmedNotes ->
+            onConfirm = { confirmedCustomer, mode, partialPaid, confirmedNotes ->
                 viewModel.submitPurchase(
                     customerId = confirmedCustomer.id,
-                    isCredit = creditMode,
+                    mode = mode,
+                    partialPaid = partialPaid,
                     note = confirmedNotes
                 ) {
                     showReviewModal = false
@@ -706,8 +714,8 @@ fun ProductGridCard(
 
 /**
  * Centered Review Transaction Modal displaying clear purchase summary,
- * product list with unit prices and subtotals, credit vs cash toggle,
- * customer selection, and atomic confirmation.
+ * product list with unit prices and subtotals, 3-way settlement mode selection
+ * (Full Debt, Full Cash, Partial Cash+Debt), customer selection, and atomic confirmation.
  */
 @Composable
 fun ReviewTransactionModal(
@@ -715,23 +723,38 @@ fun ReviewTransactionModal(
     totalAmount: Money,
     customers: List<Customer>,
     initialCustomer: Customer?,
-    isCredit: Boolean,
+    settlementMode: SettlementMode,
+    initialPartialPaid: String,
     notes: String,
+    isSubmitting: Boolean,
     onCustomerChanged: (Customer?) -> Unit,
-    onIsCreditChanged: (Boolean) -> Unit,
+    onSettlementModeChanged: (SettlementMode) -> Unit,
+    onPartialPaidChanged: (String) -> Unit,
     onNotesChanged: (String) -> Unit,
     onAddNewCustomer: () -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: (Customer, Boolean, String) -> Unit
+    onConfirm: (Customer, SettlementMode, Money, String) -> Unit
 ) {
     val strings = LocalStrings.current
     val themeColors = LocalAppThemeColors.current
     var currentlySelectedCustomer by remember(initialCustomer) { mutableStateOf(initialCustomer) }
-    var currentIsCredit by remember(isCredit) { mutableStateOf(isCredit) }
+    var currentSettlementMode by remember(settlementMode) { mutableStateOf(settlementMode) }
+    var currentPartialPaid by remember(initialPartialPaid) { mutableStateOf(initialPartialPaid) }
     var currentNotes by remember(notes) { mutableStateOf(notes) }
     var customerPickerExpanded by remember { mutableStateOf(false) }
     var customerSearchText by remember { mutableStateOf("") }
     var validationError by remember { mutableStateOf<String?>(null) }
+
+    val partialPaidMoney = remember(currentPartialPaid) {
+        Money.fromShekels(currentPartialPaid)
+    }
+    val remainingDebt = remember(totalAmount, partialPaidMoney) {
+        if (totalAmount > partialPaidMoney) totalAmount - partialPaidMoney else Money.ZERO
+    }
+    val isPartialValid = remember(currentSettlementMode, partialPaidMoney, totalAmount) {
+        if (currentSettlementMode != SettlementMode.PARTIAL) true
+        else partialPaidMoney.isPositive() && partialPaidMoney < totalAmount
+    }
 
     val filteredCustomers = remember(customers, customerSearchText) {
         if (customerSearchText.isBlank()) {
@@ -744,7 +767,7 @@ fun ReviewTransactionModal(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = { if (!isSubmitting) onDismiss() }) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -786,7 +809,8 @@ fun ReviewTransactionModal(
                         }
 
                         IconButton(
-                            onClick = onDismiss,
+                            onClick = { if (!isSubmitting) onDismiss() },
+                            enabled = !isSubmitting,
                             modifier = Modifier
                                 .size(32.dp)
                                 .clip(CircleShape)
@@ -817,7 +841,7 @@ fun ReviewTransactionModal(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
-                            TextButton(onClick = onAddNewCustomer) {
+                            TextButton(onClick = onAddNewCustomer, enabled = !isSubmitting) {
                                 Text(
                                     text = "+ " + strings.addCustomer,
                                     fontSize = 12.sp,
@@ -838,7 +862,7 @@ fun ReviewTransactionModal(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .clickable { customerPickerExpanded = !customerPickerExpanded }
+                                    .clickable(enabled = !isSubmitting) { customerPickerExpanded = !customerPickerExpanded }
                                     .testTag("review_selected_customer_card")
                             ) {
                                 Row(
@@ -897,6 +921,7 @@ fun ReviewTransactionModal(
 
                                     TextButton(
                                         onClick = { customerPickerExpanded = !customerPickerExpanded },
+                                        enabled = !isSubmitting,
                                         modifier = Modifier.testTag("change_customer_btn")
                                     ) {
                                         Text(
@@ -917,7 +942,7 @@ fun ReviewTransactionModal(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .clickable { customerPickerExpanded = !customerPickerExpanded }
+                                    .clickable(enabled = !isSubmitting) { customerPickerExpanded = !customerPickerExpanded }
                                     .testTag("review_empty_customer_card")
                             ) {
                                 Row(
@@ -959,7 +984,7 @@ fun ReviewTransactionModal(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(10.dp)
-                                ) {
+                                 ) {
                                      OutlinedTextField(
                                         value = customerSearchText,
                                         onValueChange = { customerSearchText = it },
@@ -1065,7 +1090,7 @@ fun ReviewTransactionModal(
                     }
                 }
 
-                // Payment Method Selector (Credit Purchase vs Cash Purchase)
+                // Payment Method Selector (3 Settlement Modes)
                 item {
                     Text(
                         text = strings.purchaseType,
@@ -1084,81 +1109,210 @@ fun ReviewTransactionModal(
                             .padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        // Credit Option
+                        // 1. Full Debt Option
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
-                                    if (currentIsCredit) FinancialDebtContainer.copy(alpha = 0.5f) else Color.Transparent
+                                    if (currentSettlementMode == SettlementMode.FULL_DEBT) FinancialDebtContainer.copy(alpha = 0.5f) else Color.Transparent
                                 )
-                                .clickable {
-                                    currentIsCredit = true
-                                    onIsCreditChanged(true)
+                                .clickable(enabled = !isSubmitting) {
+                                    currentSettlementMode = SettlementMode.FULL_DEBT
+                                    onSettlementModeChanged(SettlementMode.FULL_DEBT)
+                                    validationError = null
                                 }
                                 .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = currentIsCredit,
+                                selected = currentSettlementMode == SettlementMode.FULL_DEBT,
                                 onClick = {
-                                    currentIsCredit = true
-                                    onIsCreditChanged(true)
+                                    if (!isSubmitting) {
+                                        currentSettlementMode = SettlementMode.FULL_DEBT
+                                        onSettlementModeChanged(SettlementMode.FULL_DEBT)
+                                        validationError = null
+                                    }
                                 },
                                 colors = RadioButtonDefaults.colors(selectedColor = FinancialDebt)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
-                                    text = strings.creditPurchase,
+                                    text = strings.settlementFullDebt,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp,
-                                    color = if (currentIsCredit) FinancialDebt else Color.DarkGray
+                                    color = if (currentSettlementMode == SettlementMode.FULL_DEBT) FinancialDebt else Color.DarkGray
                                 )
                                 Text(
-                                    text = strings.creditPurchaseNotice,
+                                    text = strings.settlementFullDebtDesc,
                                     fontSize = 11.sp,
                                     color = Color.Gray
                                 )
                             }
                         }
 
-                        // Cash Option
+                        // 2. Full Cash Option
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
-                                    if (!currentIsCredit) FinancialCashContainer.copy(alpha = 0.5f) else Color.Transparent
+                                    if (currentSettlementMode == SettlementMode.FULL_CASH) FinancialCashContainer.copy(alpha = 0.5f) else Color.Transparent
                                 )
-                                .clickable {
-                                    currentIsCredit = false
-                                    onIsCreditChanged(false)
+                                .clickable(enabled = !isSubmitting) {
+                                    currentSettlementMode = SettlementMode.FULL_CASH
+                                    onSettlementModeChanged(SettlementMode.FULL_CASH)
+                                    validationError = null
                                 }
                                 .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = !currentIsCredit,
+                                selected = currentSettlementMode == SettlementMode.FULL_CASH,
                                 onClick = {
-                                    currentIsCredit = false
-                                    onIsCreditChanged(false)
+                                    if (!isSubmitting) {
+                                        currentSettlementMode = SettlementMode.FULL_CASH
+                                        onSettlementModeChanged(SettlementMode.FULL_CASH)
+                                        validationError = null
+                                    }
                                 },
                                 colors = RadioButtonDefaults.colors(selectedColor = FinancialCash)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
-                                    text = strings.cashPurchase,
+                                    text = strings.settlementFullCash,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp,
-                                    color = if (!currentIsCredit) FinancialCash else Color.DarkGray
+                                    color = if (currentSettlementMode == SettlementMode.FULL_CASH) FinancialCash else Color.DarkGray
                                 )
                                 Text(
-                                    text = strings.cashPurchaseNotice,
+                                    text = strings.settlementFullCashDesc,
                                     fontSize = 11.sp,
                                     color = Color.Gray
                                 )
+                            }
+                        }
+
+                        // 3. Partial (Cash + Debt) Option
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (currentSettlementMode == SettlementMode.PARTIAL) themeColors.primaryContainer.copy(alpha = 0.5f) else Color.Transparent
+                                )
+                                .clickable(enabled = !isSubmitting) {
+                                    currentSettlementMode = SettlementMode.PARTIAL
+                                    onSettlementModeChanged(SettlementMode.PARTIAL)
+                                    validationError = null
+                                }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = currentSettlementMode == SettlementMode.PARTIAL,
+                                onClick = {
+                                    if (!isSubmitting) {
+                                        currentSettlementMode = SettlementMode.PARTIAL
+                                        onSettlementModeChanged(SettlementMode.PARTIAL)
+                                        validationError = null
+                                    }
+                                },
+                                colors = RadioButtonDefaults.colors(selectedColor = themeColors.primary)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text(
+                                    text = strings.settlementPartial,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (currentSettlementMode == SettlementMode.PARTIAL) themeColors.primary else Color.DarkGray
+                                )
+                                Text(
+                                    text = strings.settlementPartialDesc,
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                        // Detailed Partial Breakdown & Input
+                        if (currentSettlementMode == SettlementMode.PARTIAL) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, themeColors.primary.copy(alpha = 0.3f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = currentPartialPaid,
+                                        onValueChange = {
+                                            currentPartialPaid = it
+                                            onPartialPaidChanged(it)
+                                            validationError = null
+                                        },
+                                        label = { Text(strings.partialPaymentAmountPrompt) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("partial_cash_amount_input"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        singleLine = true,
+                                        isError = currentPartialPaid.isNotBlank() && !isPartialValid
+                                    )
+
+                                    // Real-time breakdown
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFFF3F4F6))
+                                            .padding(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(text = strings.totalAmount, fontSize = 12.sp, color = Color.Gray)
+                                            Text(text = totalAmount.format(), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(text = strings.cashPurchase, fontSize = 12.sp, color = FinancialPayment, fontWeight = FontWeight.SemiBold)
+                                            Text(text = partialPaidMoney.format(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FinancialPayment)
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(text = strings.settlementFullDebt, fontSize = 12.sp, color = FinancialDebt, fontWeight = FontWeight.SemiBold)
+                                            Text(text = remainingDebt.format(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FinancialDebt)
+                                        }
+                                    }
+
+                                    if (currentPartialPaid.isNotBlank() && !isPartialValid) {
+                                        Text(
+                                            text = strings.partialPaymentInvalid,
+                                            color = Color.Red,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -1222,9 +1376,20 @@ fun ReviewTransactionModal(
 
                 // Total Summary Card
                 item {
+                    val summaryBgColor = when (currentSettlementMode) {
+                        SettlementMode.FULL_DEBT -> FinancialDebtContainer
+                        SettlementMode.FULL_CASH -> FinancialCashContainer
+                        SettlementMode.PARTIAL -> themeColors.primaryContainer.copy(alpha = 0.5f)
+                    }
+                    val summaryTextColor = when (currentSettlementMode) {
+                        SettlementMode.FULL_DEBT -> FinancialDebt
+                        SettlementMode.FULL_CASH -> FinancialCash
+                        SettlementMode.PARTIAL -> themeColors.primary
+                    }
+
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = if (currentIsCredit) FinancialDebtContainer else FinancialCashContainer,
+                        color = summaryBgColor,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -1238,14 +1403,14 @@ fun ReviewTransactionModal(
                                 text = strings.totalAmount,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
-                                color = if (currentIsCredit) FinancialDebt else FinancialCash
+                                color = summaryTextColor
                             )
 
                             Text(
                                 text = totalAmount.format(),
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 22.sp,
-                                color = if (currentIsCredit) FinancialDebt else FinancialCash,
+                                color = summaryTextColor,
                                 modifier = Modifier.testTag("review_total_amount_text")
                             )
                         }
@@ -1265,7 +1430,8 @@ fun ReviewTransactionModal(
                             .fillMaxWidth()
                             .testTag("review_notes_input"),
                         shape = RoundedCornerShape(12.dp),
-                        maxLines = 2
+                        maxLines = 2,
+                        enabled = !isSubmitting
                     )
                 }
 
@@ -1308,6 +1474,7 @@ fun ReviewTransactionModal(
                     ) {
                         OutlinedButton(
                             onClick = onDismiss,
+                            enabled = !isSubmitting,
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
@@ -1316,6 +1483,11 @@ fun ReviewTransactionModal(
                         ) {
                             Text(strings.cancel)
                         }
+
+                        val canConfirm = currentlySelectedCustomer != null &&
+                            cartItems.isNotEmpty() &&
+                            !isSubmitting &&
+                            (currentSettlementMode != SettlementMode.PARTIAL || isPartialValid)
 
                         Button(
                             onClick = {
@@ -1327,16 +1499,29 @@ fun ReviewTransactionModal(
                                     validationError = strings.selectCustomerPrompt
                                     return@Button
                                 }
-                                onConfirm(currentlySelectedCustomer!!, currentIsCredit, currentNotes)
+                                if (currentSettlementMode == SettlementMode.PARTIAL && !isPartialValid) {
+                                    validationError = strings.partialPaymentInvalid
+                                    return@Button
+                                }
+                                onConfirm(
+                                    currentlySelectedCustomer!!,
+                                    currentSettlementMode,
+                                    if (currentSettlementMode == SettlementMode.PARTIAL) partialPaidMoney else Money.ZERO,
+                                    currentNotes
+                                )
                             },
-                            enabled = currentlySelectedCustomer != null && cartItems.isNotEmpty(),
+                            enabled = canConfirm,
                             modifier = Modifier
                                 .weight(1.5f)
                                 .height(48.dp)
                                 .testTag("confirm_transaction_btn"),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (currentIsCredit) FinancialDebt else FinancialPayment,
+                                containerColor = when (currentSettlementMode) {
+                                    SettlementMode.FULL_DEBT -> FinancialDebt
+                                    SettlementMode.FULL_CASH -> FinancialCash
+                                    SettlementMode.PARTIAL -> themeColors.primary
+                                },
                                 disabledContainerColor = Color(0xFFBDBDBD)
                             )
                         ) {

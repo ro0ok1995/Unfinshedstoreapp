@@ -8,6 +8,8 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.business.DebtEngine
+import com.example.core.business.AnalysisPeriod
+import com.example.core.business.AnalysisMetrics
 import com.example.core.model.AppLanguageCode
 import com.example.core.model.AppNotification
 import com.example.core.model.AppVisualThemeType
@@ -20,6 +22,7 @@ import com.example.core.model.FinancialSummary
 import com.example.core.model.Money
 import com.example.core.model.Product
 import com.example.core.model.ProductStatus
+import com.example.core.model.SettlementMode
 import com.example.core.model.Settings
 import com.example.core.model.Transaction
 import com.example.core.model.TransactionStatus
@@ -70,6 +73,13 @@ data class HomeFinancialStats(
     val cashPercentage: Float = 0f,
     val paymentsPercentage: Float = 0f,
     val hasTransactions: Boolean = false
+)
+
+data class QuickPaymentSuccessData(
+    val customer: Customer,
+    val paidAmount: Money,
+    val previousDebt: Money,
+    val newDebt: Money
 )
 
 class ShopViewModel(application: Application) : AndroidViewModel(application) {
@@ -392,6 +402,27 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         _currentDestination.value = ScreenDestination.SETTINGS
     }
 
+    // Analysis & Statements Tabs & Filters
+    enum class AnalysisScreenTab {
+        ANALYSIS_CENTER,
+        ACCOUNT_STATEMENT
+    }
+
+    private val _selectedAnalysisTab = MutableStateFlow(AnalysisScreenTab.ANALYSIS_CENTER)
+    val selectedAnalysisTab: StateFlow<AnalysisScreenTab> = _selectedAnalysisTab.asStateFlow()
+
+    private val _analysisPeriod = MutableStateFlow(AnalysisPeriod.THIS_MONTH)
+    val analysisPeriod: StateFlow<AnalysisPeriod> = _analysisPeriod.asStateFlow()
+
+    private val _analysisCustomStartDate = MutableStateFlow<Long?>(null)
+    val analysisCustomStartDate: StateFlow<Long?> = _analysisCustomStartDate.asStateFlow()
+
+    private val _analysisCustomEndDate = MutableStateFlow<Long?>(null)
+    val analysisCustomEndDate: StateFlow<Long?> = _analysisCustomEndDate.asStateFlow()
+
+    private val _isStatementNewestFirst = MutableStateFlow(true)
+    val isStatementNewestFirst: StateFlow<Boolean> = _isStatementNewestFirst.asStateFlow()
+
     // Statements Filters & Selection
     private val _selectedStatementCustomer = MutableStateFlow<Customer?>(null)
     val selectedStatementCustomer: StateFlow<Customer?> = _selectedStatementCustomer.asStateFlow()
@@ -402,8 +433,9 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
     val filteredTransactionsWithDetails: StateFlow<List<TransactionWithDetails>> = combine(
         repository.transactionsWithDetails,
         _selectedStatementCustomer,
-        selectedTxTypeFilter
-    ) { transactions, selectedCustomer, typeFilter ->
+        selectedTxTypeFilter,
+        _isStatementNewestFirst
+    ) { transactions, selectedCustomer, typeFilter, newestFirst ->
         val list = transactions.filter { item ->
             val matchCustomer = if (selectedCustomer != null) {
                 item.transaction.customerId == selectedCustomer.id || item.customer?.id == selectedCustomer.id
@@ -413,11 +445,95 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
             val matchType = typeFilter == null || item.transaction.type == typeFilter
             matchCustomer && matchType
         }
-        list.sortedByDescending { it.transaction.createdAt }
+        if (newestFirst) {
+            list.sortedByDescending { it.transaction.createdAt }
+        } else {
+            list.sortedBy { it.transaction.createdAt }
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
+    )
+
+    // Comprehensive Analysis Metrics for Analysis Center
+    private val _analysisPeriodConfig = combine(
+        _analysisPeriod,
+        _analysisCustomStartDate,
+        _analysisCustomEndDate
+    ) { period, customStart, customEnd ->
+        Triple(period, customStart, customEnd)
+    }
+
+    val analysisMetrics: StateFlow<AnalysisMetrics> = combine(
+        repository.transactionsWithDetails,
+        _selectedStatementCustomer,
+        _analysisPeriodConfig,
+        activeCustomersWithDebt,
+        repository.activeCustomers
+    ) { txList, selectedCustomer, periodConfig, customersWithDebt, allCustomers ->
+        val period = periodConfig.first
+        val customStart = periodConfig.second
+        val customEnd = periodConfig.third
+        val (startTime, endTime) = DebtEngine.getPeriodBounds(period, customStart, customEnd)
+
+        val customerTxs = if (selectedCustomer != null) {
+            txList.filter { it.transaction.customerId == selectedCustomer.id || it.customer?.id == selectedCustomer.id }
+        } else {
+            txList
+        }
+
+        val periodTxs = customerTxs.filter { item ->
+            item.transaction.createdAt in startTime..endTime
+        }.map { it.transaction }
+
+        val outstandingDebt = if (selectedCustomer != null) {
+            DebtEngine.calculateOutstandingDebt(customerTxs.map { it.transaction })
+        } else {
+            customersWithDebt.fold(Money.ZERO) { acc, c -> acc + c.outstandingDebt }
+        }
+
+        val totalCustomersCount = if (selectedCustomer != null) 1 else allCustomers.size
+        val activeCustomersCount = if (selectedCustomer != null) {
+            if (outstandingDebt.isPositive() || customerTxs.any { it.transaction.isCompleted }) 1 else 0
+        } else {
+            customersWithDebt.count { it.outstandingDebt.isPositive() }
+        }
+
+        DebtEngine.calculateAnalysisMetrics(
+            transactionsInPeriod = periodTxs,
+            totalOutstandingDebt = outstandingDebt,
+            totalCustomersCount = totalCustomersCount,
+            activeCustomersCount = activeCustomersCount
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = AnalysisMetrics()
+    )
+
+    // Chronological running balances per transaction id
+    val statementRunningBalances: StateFlow<Map<Long, Money>> = combine(
+        repository.transactionsWithDetails,
+        _selectedStatementCustomer
+    ) { txList, selectedCustomer ->
+        if (selectedCustomer != null) {
+            val customerTxs = txList.filter {
+                it.transaction.customerId == selectedCustomer.id || it.customer?.id == selectedCustomer.id
+            }.map { it.transaction }
+            DebtEngine.calculateRunningBalances(customerTxs)
+        } else {
+            val byCustomer = txList.groupBy { it.transaction.customerId ?: it.customer?.id ?: 0L }
+            val map = mutableMapOf<Long, Money>()
+            byCustomer.forEach { (_, group) ->
+                map.putAll(DebtEngine.calculateRunningBalances(group.map { it.transaction }))
+            }
+            map
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyMap()
     )
 
     // Financial calculations for Statements Screen (Mode A vs Mode B)
@@ -458,11 +574,15 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        val rawDebtMinor = totalCreditMinor - totalPaymentsMinor
-        val netDebtMinor = if (rawDebtMinor > 0L) rawDebtMinor else 0L
+        val rawDebt = if (selectedCustomer != null) {
+            DebtEngine.calculateOutstandingDebt(relevantTransactions.map { it.transaction })
+        } else {
+            val rawDebtMinor = totalCreditMinor - totalPaymentsMinor
+            Money.fromMinorUnits(if (rawDebtMinor > 0L) rawDebtMinor else 0L)
+        }
 
         StatementFinancialMetrics(
-            outstandingDebt = Money.fromMinorUnits(netDebtMinor),
+            outstandingDebt = rawDebt,
             totalPurchases = Money.fromMinorUnits(totalCreditMinor),
             totalPayments = Money.fromMinorUnits(totalPaymentsMinor),
             completedCreditPurchasesCount = creditCount,
@@ -481,6 +601,25 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isCreditPurchase = MutableStateFlow(true)
     val isCreditPurchase: StateFlow<Boolean> = _isCreditPurchase.asStateFlow()
+
+    private val _selectedSettlementMode = MutableStateFlow(SettlementMode.FULL_DEBT)
+    val selectedSettlementMode: StateFlow<SettlementMode> = _selectedSettlementMode.asStateFlow()
+
+    private val _partialCashAmount = MutableStateFlow("")
+    val partialCashAmount: StateFlow<String> = _partialCashAmount.asStateFlow()
+
+    private val _isSubmitting = MutableStateFlow(false)
+    val isSubmitting: StateFlow<Boolean> = _isSubmitting.asStateFlow()
+
+    // Quick Payment State
+    private val _showQuickPaymentDialog = MutableStateFlow(false)
+    val showQuickPaymentDialog: StateFlow<Boolean> = _showQuickPaymentDialog.asStateFlow()
+
+    private val _quickPaymentTargetCustomer = MutableStateFlow<Customer?>(null)
+    val quickPaymentTargetCustomer: StateFlow<Customer?> = _quickPaymentTargetCustomer.asStateFlow()
+
+    private val _quickPaymentSuccessData = MutableStateFlow<QuickPaymentSuccessData?>(null)
+    val quickPaymentSuccessData: StateFlow<QuickPaymentSuccessData?> = _quickPaymentSuccessData.asStateFlow()
 
     private val _cartItems = MutableStateFlow<List<CartItem>>(emptyList())
     val cartItems: StateFlow<List<CartItem>> = _cartItems.asStateFlow()
@@ -510,7 +649,9 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
             _selectedPurchaseCustomer.value = null
         }
         if (dest == ScreenDestination.STATEMENTS && _currentDestination.value != ScreenDestination.STATEMENTS) {
-            _selectedStatementCustomer.value = null
+            if (_selectedHomeCustomer.value != null) {
+                _selectedStatementCustomer.value = _selectedHomeCustomer.value
+            }
             _statementSearchQuery.value = ""
             selectedTxTypeFilter.value = null
         }
@@ -520,15 +661,43 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
     fun openPurchasesForCustomer(customer: Customer) {
         _selectedCustomerIdForDetails.value = null
         _selectedPurchaseCustomer.value = customer
+        _selectedSettlementMode.value = SettlementMode.FULL_DEBT
         _isCreditPurchase.value = true
         _currentDestination.value = ScreenDestination.PURCHASES
     }
 
     fun openPurchasesDirectly() {
         _selectedCustomerIdForDetails.value = null
-        _selectedPurchaseCustomer.value = null
-        _isCreditPurchase.value = true
+        val contextCustomer = _selectedHomeCustomer.value
+        _selectedPurchaseCustomer.value = contextCustomer
+        _selectedSettlementMode.value = if (contextCustomer != null) SettlementMode.FULL_DEBT else SettlementMode.FULL_CASH
+        _isCreditPurchase.value = contextCustomer != null
         _currentDestination.value = ScreenDestination.PURCHASES
+    }
+
+    fun openQuickPayment(customer: Customer? = null) {
+        val target = customer ?: _selectedHomeCustomer.value
+        _quickPaymentTargetCustomer.value = target
+        _quickPaymentSuccessData.value = null
+        _showQuickPaymentDialog.value = true
+    }
+
+    fun closeQuickPaymentDialog() {
+        _showQuickPaymentDialog.value = false
+        _quickPaymentTargetCustomer.value = null
+        _quickPaymentSuccessData.value = null
+    }
+
+    fun closeQuickPayment() {
+        closeQuickPaymentDialog()
+    }
+
+    fun dismissQuickPaymentSuccess() {
+        _quickPaymentSuccessData.value = null
+    }
+
+    fun setQuickPaymentCustomer(customer: Customer?) {
+        _quickPaymentTargetCustomer.value = customer
     }
 
     fun openCustomerDetails(customerId: Long) {
@@ -595,8 +764,38 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         selectedTxTypeFilter.value = type
     }
 
+    fun setSelectedAnalysisTab(tab: AnalysisScreenTab) {
+        _selectedAnalysisTab.value = tab
+    }
+
+    fun setAnalysisPeriod(period: AnalysisPeriod) {
+        _analysisPeriod.value = period
+    }
+
+    fun setAnalysisCustomDateRange(start: Long?, end: Long?) {
+        _analysisCustomStartDate.value = start
+        _analysisCustomEndDate.value = end
+        _analysisPeriod.value = AnalysisPeriod.CUSTOM
+    }
+
+    fun setStatementSortOrder(newestFirst: Boolean) {
+        _isStatementNewestFirst.value = newestFirst
+    }
+
+    fun openAnalysisCenter(customer: Customer? = null) {
+        _selectedCustomerIdForDetails.value = null
+        _selectedAnalysisTab.value = AnalysisScreenTab.ANALYSIS_CENTER
+        if (customer != null) {
+            _selectedStatementCustomer.value = customer
+        } else if (_selectedHomeCustomer.value != null) {
+            _selectedStatementCustomer.value = _selectedHomeCustomer.value
+        }
+        _currentDestination.value = ScreenDestination.STATEMENTS
+    }
+
     fun openStatementsForCustomer(customer: Customer) {
         _selectedCustomerIdForDetails.value = null
+        _selectedAnalysisTab.value = AnalysisScreenTab.ACCOUNT_STATEMENT
         _selectedStatementCustomer.value = customer
         _statementSearchQuery.value = ""
         selectedTxTypeFilter.value = null
@@ -721,26 +920,67 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
     val cartTotal: Money
         get() = _cartItems.value.fold(Money.ZERO) { acc, item -> acc + item.subtotal }
 
+    fun setSelectedSettlementMode(mode: SettlementMode) {
+        _selectedSettlementMode.value = mode
+        when (mode) {
+            SettlementMode.FULL_DEBT -> _isCreditPurchase.value = true
+            SettlementMode.FULL_CASH -> _isCreditPurchase.value = false
+            SettlementMode.PARTIAL -> _isCreditPurchase.value = true
+        }
+    }
+
+    fun setPartialCashAmount(amount: String) {
+        _partialCashAmount.value = amount
+    }
+
     fun submitPurchase(
         customerId: Long?,
         isCredit: Boolean,
         note: String,
         onSuccess: (Long) -> Unit
     ) {
+        val mode = if (isCredit) _selectedSettlementMode.value else SettlementMode.FULL_CASH
+        val partialPaid = if (mode == SettlementMode.PARTIAL) {
+            Money.fromShekels(_partialCashAmount.value)
+        } else {
+            Money.ZERO
+        }
+        submitPurchase(customerId, mode, partialPaid, note, onSuccess)
+    }
+
+    fun submitPurchase(
+        customerId: Long?,
+        mode: SettlementMode,
+        partialPaid: Money,
+        note: String,
+        onSuccess: (Long) -> Unit
+    ) {
+        if (_isSubmitting.value) return
+        _isSubmitting.value = true
         viewModelScope.launch {
             _isLoading.value = true
             try {
                 val items = _cartItems.value
+                val isCredit = mode != SettlementMode.FULL_CASH
+                val effectivePaid = when (mode) {
+                    SettlementMode.FULL_CASH -> cartTotal
+                    SettlementMode.FULL_DEBT -> Money.ZERO
+                    SettlementMode.PARTIAL -> partialPaid
+                }
+
                 val result = repository.createPurchase(
                     customerId = customerId,
                     isCredit = isCredit,
                     cartItems = items,
-                    note = note
+                    note = note,
+                    paidAmount = effectivePaid
                 )
 
                 result.onSuccess { txId ->
                     clearCart()
                     _selectedPurchaseCustomer.value = null
+                    _selectedSettlementMode.value = SettlementMode.FULL_DEBT
+                    _partialCashAmount.value = ""
                     _uiEvents.emit(if (_currentLanguage.value == AppLanguage.ARABIC) "تم تسجيل عملية الشراء بنجاح!" else "Purchase recorded successfully!")
                     onSuccess(txId)
                 }.onFailure { err ->
@@ -750,17 +990,24 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
                 _uiEvents.emit(e.message ?: "Error recording purchase")
             } finally {
                 _isLoading.value = false
+                _isSubmitting.value = false
             }
         }
     }
 
     fun submitPurchase(onSuccess: () -> Unit) {
         val customer = _selectedPurchaseCustomer.value
-        val isCredit = _isCreditPurchase.value
+        val mode = _selectedSettlementMode.value
+        val partialPaid = if (mode == SettlementMode.PARTIAL) {
+            Money.fromShekels(_partialCashAmount.value)
+        } else {
+            Money.ZERO
+        }
         val note = _purchaseNotes.value
         submitPurchase(
             customerId = customer?.id,
-            isCredit = isCredit,
+            mode = mode,
+            partialPaid = partialPaid,
             note = note,
             onSuccess = { onSuccess() }
         )
@@ -768,6 +1015,8 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
 
     // Payment actions
     fun submitPayment(customerId: Long, amount: Money, note: String, onSuccess: () -> Unit) {
+        if (_isSubmitting.value) return
+        _isSubmitting.value = true
         viewModelScope.launch {
             _isLoading.value = true
             try {
@@ -782,6 +1031,36 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
                 _uiEvents.emit(e.message ?: "Payment error")
             } finally {
                 _isLoading.value = false
+                _isSubmitting.value = false
+            }
+        }
+    }
+
+    fun submitQuickPayment(customer: Customer, amount: Money, note: String) {
+        if (_isSubmitting.value) return
+        _isSubmitting.value = true
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val previousDebt = customerDebtsMap.value[customer.id] ?: Money.ZERO
+                val result = repository.recordPayment(customer.id, amount, note)
+                result.onSuccess {
+                    val newDebt = if (previousDebt > amount) previousDebt - amount else Money.ZERO
+                    _quickPaymentSuccessData.value = QuickPaymentSuccessData(
+                        customer = customer,
+                        paidAmount = amount,
+                        previousDebt = previousDebt,
+                        newDebt = newDebt
+                    )
+                    _uiEvents.emit(if (_currentLanguage.value == AppLanguage.ARABIC) "تم تسجيل الدفعة النقدية بنجاح!" else "Payment recorded successfully!")
+                }.onFailure { err ->
+                    _uiEvents.emit(err.message ?: "Payment error")
+                }
+            } catch (e: Exception) {
+                _uiEvents.emit(e.message ?: "Payment error")
+            } finally {
+                _isLoading.value = false
+                _isSubmitting.value = false
             }
         }
     }

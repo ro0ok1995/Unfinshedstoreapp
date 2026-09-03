@@ -119,7 +119,224 @@ object DebtEngine {
         }
         return cal.timeInMillis
     }
+
+    /**
+     * Resolves start and end millisecond timestamps for the specified analysis period.
+     */
+    fun getPeriodBounds(
+        period: AnalysisPeriod,
+        customStart: Long? = null,
+        customEnd: Long? = null,
+        now: Long = System.currentTimeMillis()
+    ): Pair<Long, Long> {
+        val cal = Calendar.getInstance().apply { timeInMillis = now }
+        return when (period) {
+            AnalysisPeriod.TODAY -> {
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val start = cal.timeInMillis
+                cal.set(Calendar.HOUR_OF_DAY, 23)
+                cal.set(Calendar.MINUTE, 59)
+                cal.set(Calendar.SECOND, 59)
+                cal.set(Calendar.MILLISECOND, 999)
+                Pair(start, cal.timeInMillis)
+            }
+            AnalysisPeriod.THIS_WEEK -> {
+                cal.set(Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val start = cal.timeInMillis
+                cal.add(Calendar.DAY_OF_WEEK, 6)
+                cal.set(Calendar.HOUR_OF_DAY, 23)
+                cal.set(Calendar.MINUTE, 59)
+                cal.set(Calendar.SECOND, 59)
+                cal.set(Calendar.MILLISECOND, 999)
+                Pair(start, cal.timeInMillis)
+            }
+            AnalysisPeriod.THIS_MONTH -> {
+                cal.set(Calendar.DAY_OF_MONTH, 1)
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val start = cal.timeInMillis
+                cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
+                cal.set(Calendar.HOUR_OF_DAY, 23)
+                cal.set(Calendar.MINUTE, 59)
+                cal.set(Calendar.SECOND, 59)
+                cal.set(Calendar.MILLISECOND, 999)
+                Pair(start, cal.timeInMillis)
+            }
+            AnalysisPeriod.CUSTOM -> {
+                val start = customStart ?: 0L
+                val end = customEnd ?: Long.MAX_VALUE
+                Pair(start, end)
+            }
+            AnalysisPeriod.ALL_TIME -> {
+                Pair(0L, Long.MAX_VALUE)
+            }
+        }
+    }
+
+    /**
+     * Calculates comprehensive analytical statistics for a list of transactions in a time window.
+     */
+    fun calculateAnalysisMetrics(
+        transactionsInPeriod: List<Transaction>,
+        totalOutstandingDebt: Money,
+        totalCustomersCount: Int,
+        activeCustomersCount: Int
+    ): AnalysisMetrics {
+        var cashMinor = 0L
+        var creditMinor = 0L
+        var paymentsMinor = 0L
+        var cashCount = 0
+        var creditCount = 0
+        var paymentsCount = 0
+        var completedCount = 0
+
+        for (tx in transactionsInPeriod) {
+            if (tx.status != TransactionStatus.COMPLETED) continue
+            completedCount++
+            when (tx.type) {
+                TransactionType.CASH_PURCHASE -> {
+                    cashMinor += tx.totalAmount.minorUnits
+                    cashCount++
+                }
+                TransactionType.CREDIT_PURCHASE -> {
+                    creditMinor += tx.totalAmount.minorUnits
+                    creditCount++
+                }
+                TransactionType.PAYMENT -> {
+                    paymentsMinor += tx.totalAmount.minorUnits
+                    paymentsCount++
+                }
+            }
+        }
+
+        val totalSalesMinor = cashMinor + creditMinor
+        val totalVolumeMinor = totalSalesMinor + paymentsMinor
+
+        val cashSales = Money.fromMinorUnits(cashMinor)
+        val creditSales = Money.fromMinorUnits(creditMinor)
+        val totalSales = Money.fromMinorUnits(totalSalesMinor)
+        val paymentsCollected = Money.fromMinorUnits(paymentsMinor)
+
+        val collectionRate = if (creditMinor > 0L) {
+            ((paymentsMinor.toDouble() / creditMinor.toDouble()) * 100.0).toFloat().coerceIn(0f, 100f)
+        } else if (totalSalesMinor > 0L && paymentsMinor > 0L) {
+            100f
+        } else {
+            0f
+        }
+
+        val cashPercentage = if (totalVolumeMinor > 0L) {
+            ((cashMinor.toDouble() / totalVolumeMinor.toDouble()) * 100.0).toFloat()
+        } else 0f
+
+        val creditPercentage = if (totalVolumeMinor > 0L) {
+            ((creditMinor.toDouble() / totalVolumeMinor.toDouble()) * 100.0).toFloat()
+        } else 0f
+
+        val paymentsPercentage = if (totalVolumeMinor > 0L) {
+            ((paymentsMinor.toDouble() / totalVolumeMinor.toDouble()) * 100.0).toFloat()
+        } else 0f
+
+        val averageDebt = if (activeCustomersCount > 0 && totalOutstandingDebt.isPositive()) {
+            Money.fromMinorUnits(totalOutstandingDebt.minorUnits / activeCustomersCount)
+        } else {
+            Money.ZERO
+        }
+
+        return AnalysisMetrics(
+            totalSales = totalSales,
+            cashSales = cashSales,
+            creditSales = creditSales,
+            paymentsCollected = paymentsCollected,
+            outstandingCustomerDebt = totalOutstandingDebt,
+            totalTransactionsCount = completedCount,
+            cashSalesCount = cashCount,
+            creditSalesCount = creditCount,
+            paymentsCount = paymentsCount,
+            totalCustomersCount = totalCustomersCount,
+            activeCustomersCount = activeCustomersCount,
+            collectionRate = collectionRate,
+            cashPercentage = cashPercentage,
+            creditPercentage = creditPercentage,
+            paymentsPercentage = paymentsPercentage,
+            averageDebt = averageDebt,
+            totalVolume = Money.fromMinorUnits(totalVolumeMinor)
+        )
+    }
+
+    /**
+     * Computes chronological running debt balance for each transaction of a customer.
+     * Always evaluates in strict chronological order (oldest to newest) to preserve
+     * the exact balance trajectory over time.
+     */
+    fun calculateRunningBalances(
+        customerTransactions: List<Transaction>
+    ): Map<Long, Money> {
+        val chronological = customerTransactions.sortedBy { it.createdAt }
+        val resultMap = mutableMapOf<Long, Money>()
+        var runningDebtMinor = 0L
+
+        for (tx in chronological) {
+            if (tx.status == TransactionStatus.COMPLETED) {
+                when (tx.type) {
+                    TransactionType.CREDIT_PURCHASE -> {
+                        runningDebtMinor += tx.totalAmount.minorUnits
+                    }
+                    TransactionType.PAYMENT -> {
+                        runningDebtMinor = if (runningDebtMinor > tx.totalAmount.minorUnits) {
+                            runningDebtMinor - tx.totalAmount.minorUnits
+                        } else {
+                            0L
+                        }
+                    }
+                    TransactionType.CASH_PURCHASE -> {
+                        // Cash purchase does not affect debt running balance
+                    }
+                }
+            }
+            resultMap[tx.id] = Money.fromMinorUnits(runningDebtMinor)
+        }
+
+        return resultMap
+    }
 }
+
+enum class AnalysisPeriod {
+    TODAY,
+    THIS_WEEK,
+    THIS_MONTH,
+    CUSTOM,
+    ALL_TIME
+}
+
+data class AnalysisMetrics(
+    val totalSales: Money = Money.ZERO,
+    val cashSales: Money = Money.ZERO,
+    val creditSales: Money = Money.ZERO,
+    val paymentsCollected: Money = Money.ZERO,
+    val outstandingCustomerDebt: Money = Money.ZERO,
+    val totalTransactionsCount: Int = 0,
+    val cashSalesCount: Int = 0,
+    val creditSalesCount: Int = 0,
+    val paymentsCount: Int = 0,
+    val totalCustomersCount: Int = 0,
+    val activeCustomersCount: Int = 0,
+    val collectionRate: Float = 0f,
+    val cashPercentage: Float = 0f,
+    val creditPercentage: Float = 0f,
+    val paymentsPercentage: Float = 0f,
+    val averageDebt: Money = Money.ZERO,
+    val totalVolume: Money = Money.ZERO
+)
 
 sealed class PaymentValidationResult {
     object Valid : PaymentValidationResult()

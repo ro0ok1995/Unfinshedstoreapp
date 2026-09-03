@@ -284,7 +284,7 @@ fun ThemedGlobalDrawer(
                 isSelected = false,
                 testTag = "drawer_item_stats",
                 onClick = {
-                    viewModel.navigateTo(ScreenDestination.STATEMENTS)
+                    viewModel.openAnalysisCenter()
                     onCloseDrawer()
                 }
             )
@@ -295,6 +295,7 @@ fun ThemedGlobalDrawer(
                 isSelected = false,
                 testTag = "drawer_item_statements",
                 onClick = {
+                    viewModel.setSelectedAnalysisTab(ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT)
                     viewModel.navigateTo(ScreenDestination.STATEMENTS)
                     onCloseDrawer()
                 }

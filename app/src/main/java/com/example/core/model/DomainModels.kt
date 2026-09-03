@@ -88,6 +88,12 @@ data class CartItem(
     val subtotal: Money get() = unitPrice * quantity
 }
 
+enum class SettlementMode {
+    FULL_DEBT,   // على الحساب / آجل كامل
+    FULL_CASH,   // دفع كاش كامل
+    PARTIAL      // دفع جزئي (نقد + آجل)
+}
+
 data class CustomerWithDebt(
     val customer: Customer,
     val outstandingDebt: Money,

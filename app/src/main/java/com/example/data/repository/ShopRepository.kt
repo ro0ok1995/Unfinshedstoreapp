@@ -254,11 +254,18 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
         customerId: Long?,
         isCredit: Boolean,
         cartItems: List<CartItem>,
-        note: String
+        note: String,
+        paidAmount: Money
     ): Result<Long> = runCatching {
-        // Validate customer if credit purchase
+        val totalMinor = cartItems.fold(0L) { acc, item -> acc + item.subtotal.minorUnits }
+        val totalMoney = Money.fromMinorUnits(totalMinor)
+
+        // Determine if effectively credit or cash
+        val isEffectiveCredit = isCredit && (paidAmount < totalMoney)
         var customerIsActive = true
-        if (isCredit) {
+        var customerName = ""
+
+        if (isEffectiveCredit || (isCredit && customerId != null)) {
             if (customerId == null) {
                 throw IllegalArgumentException("A customer must be selected for credit purchases.")
             }
@@ -268,12 +275,25 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
                 throw IllegalStateException("Cannot create credit purchase for archived or deleted customer.")
             }
             customerIsActive = customer.status == CustomerStatus.ACTIVE
+            customerName = customer.name
         }
 
-        val validation = if (isCredit) {
-            TransactionValidator.validateCreditPurchase(customerId, customerIsActive, cartItems)
-        } else {
-            TransactionValidator.validateCashPurchase(cartItems)
+        val isPartial = isEffectiveCredit && paidAmount.isPositive()
+
+        val validation = when {
+            isPartial -> TransactionValidator.validatePartialPurchase(
+                customerId = customerId,
+                customerIsActive = customerIsActive,
+                cartItems = cartItems,
+                paidAmount = paidAmount,
+                totalAmount = totalMoney
+            )
+            isEffectiveCredit -> TransactionValidator.validateCreditPurchase(
+                customerId = customerId,
+                customerIsActive = customerIsActive,
+                cartItems = cartItems
+            )
+            else -> TransactionValidator.validateCashPurchase(cartItems)
         }
 
         if (!validation.isValid) {
@@ -281,66 +301,148 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
             throw IllegalArgumentException(errorMsg)
         }
 
-        // Calculate total amount in minor units
-        val totalMinor = cartItems.fold(0L) { acc, item -> acc + item.subtotal.minorUnits }
-        val txType = if (isCredit) TransactionType.CREDIT_PURCHASE else TransactionType.CASH_PURCHASE
         val now = System.currentTimeMillis()
 
         // Execute atomically in Room transaction
         database.withTransaction {
-            val txEntity = com.example.data.db.TransactionEntity(
-                customerId = customerId,
-                type = txType,
-                totalAmount = totalMinor,
-                status = TransactionStatus.COMPLETED,
-                note = note.trim(),
-                createdAt = now,
-                updatedAt = now
-            )
-
-            val txId = transactionDao.insertTransaction(txEntity)
-
-            val itemEntities = cartItems.map { item ->
-                TransactionItemEntity(
-                    transactionId = txId,
-                    productId = item.productId,
-                    productNameSnapshot = item.name,
-                    unitPrice = item.unitPrice.minorUnits,
-                    quantity = item.quantity,
-                    subtotal = item.subtotal.minorUnits
+            if (!isEffectiveCredit) {
+                // Full Cash Purchase
+                val txEntity = com.example.data.db.TransactionEntity(
+                    customerId = customerId,
+                    type = TransactionType.CASH_PURCHASE,
+                    totalAmount = totalMinor,
+                    status = TransactionStatus.COMPLETED,
+                    note = note.trim(),
+                    createdAt = now,
+                    updatedAt = now
                 )
-            }
 
-            transactionDao.insertTransactionItems(itemEntities)
+                val txId = transactionDao.insertTransaction(txEntity)
 
-            // Insert notification
-            val formattedTotal = Money.fromMinorUnits(totalMinor).format()
-            if (isCredit && customerId != null) {
-                val customer = customerDao.getCustomerById(customerId)
+                val itemEntities = cartItems.map { item ->
+                    TransactionItemEntity(
+                        transactionId = txId,
+                        productId = item.productId,
+                        productNameSnapshot = item.name,
+                        unitPrice = item.unitPrice.minorUnits,
+                        quantity = item.quantity,
+                        subtotal = item.subtotal.minorUnits
+                    )
+                }
+                transactionDao.insertTransactionItems(itemEntities)
+
+                val formattedTotal = totalMoney.format()
+                notificationDao.insertNotification(
+                    NotificationEntity(
+                        title = "فاتورة شراء نقدي",
+                        message = if (customerName.isNotBlank()) "تم تسجيل عملية شراء نقدية بقيمة $formattedTotal للزبون $customerName" else "تم تسجيل عملية شراء نقدية بقيمة $formattedTotal",
+                        type = "cash_purchase",
+                        customerId = customerId,
+                        isRead = false,
+                        createdAt = now
+                    )
+                )
+
+                txId
+            } else if (!isPartial) {
+                // Full Debt Purchase
+                val txEntity = com.example.data.db.TransactionEntity(
+                    customerId = customerId,
+                    type = TransactionType.CREDIT_PURCHASE,
+                    totalAmount = totalMinor,
+                    status = TransactionStatus.COMPLETED,
+                    note = note.trim(),
+                    createdAt = now,
+                    updatedAt = now
+                )
+
+                val txId = transactionDao.insertTransaction(txEntity)
+
+                val itemEntities = cartItems.map { item ->
+                    TransactionItemEntity(
+                        transactionId = txId,
+                        productId = item.productId,
+                        productNameSnapshot = item.name,
+                        unitPrice = item.unitPrice.minorUnits,
+                        quantity = item.quantity,
+                        subtotal = item.subtotal.minorUnits
+                    )
+                }
+                transactionDao.insertTransactionItems(itemEntities)
+
+                val formattedTotal = totalMoney.format()
                 notificationDao.insertNotification(
                     NotificationEntity(
                         title = "فاتورة شراء آجل",
-                        message = "تم تسجيل مشتريات آجلة بقيمة $formattedTotal للزبون ${customer?.name ?: ""}",
+                        message = "تم تسجيل مشتريات آجلة بقيمة $formattedTotal للزبون $customerName",
                         type = "purchase",
                         customerId = customerId,
                         isRead = false,
                         createdAt = now
                     )
                 )
+
+                txId
             } else {
+                // Partial Purchase: Record CREDIT_PURCHASE and PAYMENT atomically
+                val txEntity = com.example.data.db.TransactionEntity(
+                    customerId = customerId,
+                    type = TransactionType.CREDIT_PURCHASE,
+                    totalAmount = totalMinor,
+                    status = TransactionStatus.COMPLETED,
+                    note = note.trim(),
+                    createdAt = now,
+                    updatedAt = now
+                )
+
+                val purchaseTxId = transactionDao.insertTransaction(txEntity)
+
+                val itemEntities = cartItems.map { item ->
+                    TransactionItemEntity(
+                        transactionId = purchaseTxId,
+                        productId = item.productId,
+                        productNameSnapshot = item.name,
+                        unitPrice = item.unitPrice.minorUnits,
+                        quantity = item.quantity,
+                        subtotal = item.subtotal.minorUnits
+                    )
+                }
+                transactionDao.insertTransactionItems(itemEntities)
+
+                // Record payment for the cash portion
+                val paymentNote = if (note.trim().isNotBlank()) {
+                    "دفعة نقدية مع الفاتورة #${purchaseTxId} (${note.trim()})"
+                } else {
+                    "دفعة نقدية مع الفاتورة #${purchaseTxId}"
+                }
+
+                val paymentEntity = com.example.data.db.TransactionEntity(
+                    customerId = customerId,
+                    type = TransactionType.PAYMENT,
+                    totalAmount = paidAmount.minorUnits,
+                    status = TransactionStatus.COMPLETED,
+                    note = paymentNote,
+                    createdAt = now + 1, // slight timestamp offset for ordering
+                    updatedAt = now + 1
+                )
+                transactionDao.insertTransaction(paymentEntity)
+
+                val remainingMinor = totalMinor - paidAmount.minorUnits
+                val remainingMoney = Money.fromMinorUnits(remainingMinor)
+
                 notificationDao.insertNotification(
                     NotificationEntity(
-                        title = "فاتورة شراء نقدي",
-                        message = "تم تسجيل عملية شراء نقدية بقيمة $formattedTotal",
-                        type = "cash_purchase",
-                        customerId = null,
+                        title = "فاتورة شراء مع دفعة نقدية",
+                        message = "تم تسجيل شراء بقيمة ${totalMoney.format()}، استلام نقدي ${paidAmount.format()}، والمتبقي دين ${remainingMoney.format()} للزبون $customerName",
+                        type = "purchase",
+                        customerId = customerId,
                         isRead = false,
                         createdAt = now
                     )
                 )
-            }
 
-            txId
+                purchaseTxId
+            }
         }
     }
 

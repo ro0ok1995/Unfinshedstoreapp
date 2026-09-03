@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Payments
@@ -376,6 +377,21 @@ fun CustomerDetailsScreen(
                 )
             }
 
+            // CARD 2.5: Analysis Center for this customer
+            item {
+                PrimaryActionCard(
+                    icon = Icons.Default.BarChart,
+                    iconTint = themeColors.primary,
+                    iconContainerColor = themeColors.primaryContainer,
+                    title = strings.tabAnalysisCenter,
+                    subtitle = "عرض المؤشرات والرسوم البيانية لحساب ${customer.name}",
+                    onClick = {
+                        viewModel.openAnalysisCenter(customer)
+                    },
+                    testTag = "card_action_view_customer_analysis"
+                )
+            }
+
             // CARD 3: Record Payment -> Open Modal Payment Dialog with calm green accent
             item {
                 PrimaryActionCard(
@@ -384,7 +400,7 @@ fun CustomerDetailsScreen(
                     iconContainerColor = FinancialPaymentContainer,
                     title = strings.recordPayment,
                     subtitle = if (customerDebt.isPositive()) strings.recordPaymentDesc else strings.accountFullyPaid,
-                    onClick = { showPaymentDialog = true },
+                    onClick = { viewModel.openQuickPayment(customer) },
                     testTag = "card_action_record_payment"
                 )
             }
