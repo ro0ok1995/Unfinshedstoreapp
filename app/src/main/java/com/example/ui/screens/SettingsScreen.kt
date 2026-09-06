@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -137,7 +138,8 @@ enum class ArchiveSubSection {
 @Composable
 fun SettingsScreen(
     viewModel: ShopViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenDrawer: () -> Unit = {}
 ) {
     val strings = LocalStrings.current
     val currentLang = LocalAppLanguage.current
@@ -172,6 +174,20 @@ fun SettingsScreen(
                     SettingsTab.APPEARANCE -> strings.settingsTabAppearance
                     SettingsTab.REPORTS -> strings.settingsTabReports
                     SettingsTab.ABOUT -> strings.settingsTabAbout
+                },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onOpenDrawer,
+                        modifier = Modifier
+                            .testTag("settings_drawer_btn")
+                            .size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = strings.drawerMore,
+                            tint = Color.White
+                        )
+                    }
                 }
             )
 

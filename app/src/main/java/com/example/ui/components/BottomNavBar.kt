@@ -29,9 +29,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.Home
@@ -240,13 +243,13 @@ fun FloatingCurvedBottomBar(
                     // 2. ACCOUNTS
                     NavDestinationItem(
                         item = NavItemData(
-                            destination = ScreenDestination.DATABASE,
+                            destination = ScreenDestination.ACCOUNTS,
                             label = strings.navAccounts,
                             selectedIcon = Icons.Filled.People,
                             unselectedIcon = Icons.Outlined.People,
                             testTag = "nav_item_accounts"
                         ),
-                        isSelected = currentDestination == ScreenDestination.DATABASE,
+                        isSelected = currentDestination == ScreenDestination.ACCOUNTS,
                         onNavigate = onNavigate,
                         modifier = Modifier.weight(1f)
                     )
@@ -300,13 +303,13 @@ fun FloatingCurvedBottomBar(
                     // 4. ANALYSIS CENTER
                     NavDestinationItem(
                         item = NavItemData(
-                            destination = ScreenDestination.STATEMENTS,
+                            destination = ScreenDestination.ANALYSIS_CENTER,
                             label = strings.navAnalysisCenter,
                             selectedIcon = Icons.Filled.Assessment,
                             unselectedIcon = Icons.Outlined.Assessment,
                             testTag = "nav_item_analysis_center"
                         ),
-                        isSelected = currentDestination == ScreenDestination.STATEMENTS,
+                        isSelected = currentDestination == ScreenDestination.ANALYSIS_CENTER,
                         onNavigate = onNavigate,
                         modifier = Modifier.weight(1f)
                     )
@@ -314,13 +317,13 @@ fun FloatingCurvedBottomBar(
                     // 5. MORE
                     NavDestinationItem(
                         item = NavItemData(
-                            destination = ScreenDestination.SETTINGS,
+                            destination = ScreenDestination.MORE,
                             label = strings.navMore,
                             selectedIcon = Icons.Filled.MoreHoriz,
                             unselectedIcon = Icons.Outlined.MoreHoriz,
                             testTag = "nav_item_more"
                         ),
-                        isSelected = currentDestination == ScreenDestination.SETTINGS,
+                        isSelected = currentDestination == ScreenDestination.MORE,
                         onNavigate = onNavigate,
                         modifier = Modifier.weight(1f)
                     )
@@ -465,7 +468,7 @@ fun QuickActionBottomSheet(
                     fontSize = 18.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 ),
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier.padding(bottom = 14.dp)
             )
 
             // Option 1: Record Transaction / Purchase

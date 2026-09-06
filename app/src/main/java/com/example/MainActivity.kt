@@ -38,6 +38,8 @@ import com.example.data.localization.ArabicStrings
 import com.example.data.localization.EnglishStrings
 import com.example.data.localization.LocalAppLanguage
 import com.example.data.localization.LocalStrings
+import com.example.ui.components.AddEditCustomerDialog
+import com.example.ui.components.AddEditProductDialog
 import com.example.ui.components.FloatingCurvedBottomBar
 import com.example.ui.components.LoadingDialog
 import com.example.ui.components.NotificationsSheet
@@ -45,9 +47,11 @@ import com.example.ui.components.QuickActionBottomSheet
 import com.example.ui.components.QuickPaymentDialog
 import com.example.ui.components.QuickPaymentSuccessDialog
 import com.example.ui.components.ThemedGlobalDrawer
+import com.example.ui.screens.AccountsScreen
 import com.example.ui.screens.CustomerDetailsScreen
 import com.example.ui.screens.DatabaseScreen
 import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.MoreScreen
 import com.example.ui.screens.PurchasesScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.StatementsScreen
@@ -107,6 +111,8 @@ fun MainAppContent(viewModel: ShopViewModel) {
     val scope = rememberCoroutineScope()
     var showQuickActionSheet by remember { mutableStateOf(false) }
     var showNotificationsSheet by remember { mutableStateOf(false) }
+    var showAddCustomerDialog by remember { mutableStateOf(false) }
+    var showAddProductDialog by remember { mutableStateOf(false) }
 
     // Handle UI Events (Snackbars / Toasts)
     LaunchedEffect(Unit) {
@@ -178,14 +184,24 @@ fun MainAppContent(viewModel: ShopViewModel) {
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                                 onShowNotification = { showNotificationsSheet = true }
                             )
+                            ScreenDestination.ACCOUNTS -> AccountsScreen(
+                                viewModel = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
                             ScreenDestination.PURCHASES -> PurchasesScreen(viewModel = viewModel)
-                            ScreenDestination.STATEMENTS -> StatementsScreen(viewModel = viewModel)
-                            ScreenDestination.DATABASE -> DatabaseScreen(
+                            ScreenDestination.ANALYSIS_CENTER -> StatementsScreen(
+                                viewModel = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
+                            ScreenDestination.MORE -> MoreScreen(
+                                viewModel = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
+                            ScreenDestination.DATA_CENTER -> DatabaseScreen(
                                 viewModel = viewModel,
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                                 onShowNotification = { showNotificationsSheet = true }
                             )
-                            ScreenDestination.SETTINGS -> SettingsScreen(viewModel = viewModel)
                         }
                     }
                 }
@@ -209,6 +225,30 @@ fun MainAppContent(viewModel: ShopViewModel) {
                         },
                         onQuickPayment = {
                             viewModel.openQuickPayment(null)
+                        }
+                    )
+                }
+
+                if (showAddCustomerDialog) {
+                    AddEditCustomerDialog(
+                        customer = null,
+                        onDismiss = { showAddCustomerDialog = false },
+                        onSave = { newCust ->
+                            viewModel.saveCustomer(newCust) {
+                                showAddCustomerDialog = false
+                            }
+                        }
+                    )
+                }
+
+                if (showAddProductDialog) {
+                    AddEditProductDialog(
+                        product = null,
+                        onDismiss = { showAddProductDialog = false },
+                        onSave = { newProd ->
+                            viewModel.saveProduct(newProd) {
+                                showAddProductDialog = false
+                            }
                         }
                     )
                 }

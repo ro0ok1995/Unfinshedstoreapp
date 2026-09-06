@@ -312,7 +312,25 @@ class BackupService(private val database: AppDatabase) {
     }
 
     /**
-     * Restores all data from payload atomically within a database transaction.
+     * Restores a backup WITHOUT wiping current data first. Per the reference,
+     * archive/trash-style safety is preferred over routine destructive deletion,
+     * and restores should let existing data survive rather than being silently
+     * erased. Records are merged by ID:
+     *  - an ID that exists in both the backup and the current data is REPLACED
+     *    with the backup's version,
+     *  - an ID only in the backup is ADDED,
+     *  - anything currently on the device that the backup doesn't mention is
+     *    left untouched (not deleted).
+     * Customers/products are upserted with an explicit UPDATE-or-INSERT check
+     * rather than a raw "insert with REPLACE": a raw REPLACE does a delete+insert
+     * under the hood, and since transactions.customer_id/product_id are ON DELETE
+     * SET NULL, that would silently unlink a customer's or product's existing
+     * transactions. An explicit UPDATE never triggers that delete, so existing
+     * links survive. Transactions use REPLACE deliberately — their own children
+     * (line items) are meant to be replaced, and are re-inserted right after.
+     * This isn't the full per-item Replace/Add/Skip review screen the reference
+     * describes, but it removes the "restoring silently deletes everything you
+     * had" risk, which was the unsafe part.
      */
     suspend fun restoreFromPayload(payload: BackupPayload): Result<Unit> = runCatching {
         val customerDao = database.customerDao()
@@ -321,18 +339,22 @@ class BackupService(private val database: AppDatabase) {
         val settingsDao = database.settingsDao()
 
         database.withTransaction {
-            // 1. Clear existing records
-            transactionDao.deleteAllTransactionItems()
-            transactionDao.deleteAllTransactions()
-            customerDao.deleteAllCustomers()
-            productDao.deleteAllProducts()
-
-            // 2. Insert restored records
-            if (payload.customers.isNotEmpty()) {
-                customerDao.insertAll(payload.customers.map { it.toEntity() })
+            // Parents first, so foreign keys on transactions/items resolve correctly.
+            payload.customers.forEach { customer ->
+                val entity = customer.toEntity()
+                if (customer.id != 0L && customerDao.getCustomerById(customer.id) != null) {
+                    customerDao.updateCustomer(entity)
+                } else {
+                    customerDao.insertCustomer(entity)
+                }
             }
-            if (payload.products.isNotEmpty()) {
-                productDao.insertAll(payload.products.map { it.toEntity() })
+            payload.products.forEach { product ->
+                val entity = product.toEntity()
+                if (product.id != 0L && productDao.getProductById(product.id) != null) {
+                    productDao.updateProduct(entity)
+                } else {
+                    productDao.insertProduct(entity)
+                }
             }
             if (payload.transactions.isNotEmpty()) {
                 transactionDao.insertAllTransactions(payload.transactions.map { it.toEntity() })
@@ -341,7 +363,6 @@ class BackupService(private val database: AppDatabase) {
                 transactionDao.insertTransactionItems(payload.transactionItems.map { it.toEntity() })
             }
 
-            // 3. Update settings
             settingsDao.insertOrUpdate(payload.settings.toEntity())
         }
     }

@@ -20,6 +20,7 @@ import com.example.core.model.CustomerStatus
 import com.example.core.model.CustomerWithDebt
 import com.example.core.model.FinancialSummary
 import com.example.core.model.Money
+import com.example.core.model.NotificationDisplay
 import com.example.core.model.Product
 import com.example.core.model.ProductStatus
 import com.example.core.model.SettlementMode
@@ -50,10 +51,11 @@ import java.io.InputStreamReader
 
 enum class ScreenDestination {
     HOME,
+    ACCOUNTS,
     PURCHASES,
-    STATEMENTS,
-    DATABASE,
-    SETTINGS
+    ANALYSIS_CENTER,
+    MORE,
+    DATA_CENTER
 }
 
 enum class HomePeriod {
@@ -77,7 +79,9 @@ data class HomeFinancialStats(
 
 data class QuickPaymentSuccessData(
     val customer: Customer,
-    val paidAmount: Money,
+    val totalAmount: Money,
+    val mode: SettlementMode,
+    val cashPortion: Money,
     val previousDebt: Money,
     val newDebt: Money
 )
@@ -148,6 +152,33 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = 0
+    )
+
+    // Resolves each notification's customer/amount/type from its linked Transaction
+    // at read time (see AppNotification/NotificationDisplay) instead of the old
+    // approach of copying that text into the notification row when it was created.
+    val notificationDisplayItems: StateFlow<List<NotificationDisplay>> = combine(
+        notifications,
+        repository.transactionsWithDetails
+    ) { notifs, txDetails ->
+        val txById = txDetails.associateBy { it.transaction.id }
+        notifs.mapNotNull { notif ->
+            val details = txById[notif.transactionId] ?: return@mapNotNull null
+            NotificationDisplay(
+                id = notif.id,
+                transactionId = notif.transactionId,
+                createdAt = notif.createdAt,
+                isRead = notif.isRead,
+                transactionType = details.transaction.type,
+                amount = details.transaction.totalAmount,
+                customerId = details.customer?.id,
+                customerName = details.customer?.name
+            )
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
     )
 
     val financialSummary: StateFlow<FinancialSummary> = repository.financialSummary.stateIn(
@@ -399,16 +430,17 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
     fun openSettingsWithTabName(tabName: String) {
         _selectedSettingsTab.value = tabName
         _selectedCustomerIdForDetails.value = null
-        _currentDestination.value = ScreenDestination.SETTINGS
+        _currentDestination.value = ScreenDestination.MORE
     }
 
     // Analysis & Statements Tabs & Filters
     enum class AnalysisScreenTab {
-        ANALYSIS_CENTER,
-        ACCOUNT_STATEMENT
+        STATISTICS,
+        ACCOUNT_STATEMENT,
+        REPORTS
     }
 
-    private val _selectedAnalysisTab = MutableStateFlow(AnalysisScreenTab.ANALYSIS_CENTER)
+    private val _selectedAnalysisTab = MutableStateFlow(AnalysisScreenTab.STATISTICS)
     val selectedAnalysisTab: StateFlow<AnalysisScreenTab> = _selectedAnalysisTab.asStateFlow()
 
     private val _analysisPeriod = MutableStateFlow(AnalysisPeriod.THIS_MONTH)
@@ -621,6 +653,23 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
     private val _quickPaymentSuccessData = MutableStateFlow<QuickPaymentSuccessData?>(null)
     val quickPaymentSuccessData: StateFlow<QuickPaymentSuccessData?> = _quickPaymentSuccessData.asStateFlow()
 
+    // Quick Payment settlement inputs — same unified model as Purchases (section 12
+    // of the reference): Full Cash, Full Debt, or Partial (cash now + remainder on
+    // the customer's account), applied to a manually entered amount instead of a cart.
+    private val _quickSettlementMode = MutableStateFlow(SettlementMode.FULL_DEBT)
+    val quickSettlementMode: StateFlow<SettlementMode> = _quickSettlementMode.asStateFlow()
+
+    private val _quickPartialCashAmount = MutableStateFlow("")
+    val quickPartialCashAmount: StateFlow<String> = _quickPartialCashAmount.asStateFlow()
+
+    fun setQuickSettlementMode(mode: SettlementMode) {
+        _quickSettlementMode.value = mode
+    }
+
+    fun setQuickPartialCashAmount(value: String) {
+        _quickPartialCashAmount.value = value
+    }
+
     private val _cartItems = MutableStateFlow<List<CartItem>>(emptyList())
     val cartItems: StateFlow<List<CartItem>> = _cartItems.asStateFlow()
 
@@ -648,12 +697,13 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         if (dest == ScreenDestination.PURCHASES && _currentDestination.value != ScreenDestination.PURCHASES) {
             _selectedPurchaseCustomer.value = null
         }
-        if (dest == ScreenDestination.STATEMENTS && _currentDestination.value != ScreenDestination.STATEMENTS) {
+        if (dest == ScreenDestination.ANALYSIS_CENTER && _currentDestination.value != ScreenDestination.ANALYSIS_CENTER) {
             if (_selectedHomeCustomer.value != null) {
                 _selectedStatementCustomer.value = _selectedHomeCustomer.value
             }
             _statementSearchQuery.value = ""
             selectedTxTypeFilter.value = null
+            _selectedAnalysisTab.value = AnalysisScreenTab.STATISTICS
         }
         _currentDestination.value = dest
     }
@@ -679,6 +729,8 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         val target = customer ?: _selectedHomeCustomer.value
         _quickPaymentTargetCustomer.value = target
         _quickPaymentSuccessData.value = null
+        _quickSettlementMode.value = if (target != null) SettlementMode.FULL_DEBT else SettlementMode.FULL_CASH
+        _quickPartialCashAmount.value = ""
         _showQuickPaymentDialog.value = true
     }
 
@@ -686,6 +738,8 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         _showQuickPaymentDialog.value = false
         _quickPaymentTargetCustomer.value = null
         _quickPaymentSuccessData.value = null
+        _quickSettlementMode.value = SettlementMode.FULL_DEBT
+        _quickPartialCashAmount.value = ""
     }
 
     fun closeQuickPayment() {
@@ -739,12 +793,21 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun handleNotificationClick(notification: AppNotification) {
+    fun handleNotificationClick(notification: NotificationDisplay) {
         viewModelScope.launch {
             repository.markNotificationAsRead(notification.id)
             if (notification.customerId != null) {
                 openCustomerDetails(notification.customerId)
             }
+        }
+    }
+
+    // Marks items read only when they were actually seen while the list was open,
+    // per the reference's read rule (unseen/off-screen items stay unread).
+    fun markNotificationsAsRead(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.markNotificationsAsRead(ids)
         }
     }
 
@@ -782,15 +845,15 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         _isStatementNewestFirst.value = newestFirst
     }
 
-    fun openAnalysisCenter(customer: Customer? = null) {
+    fun openAnalysisCenter(customer: Customer? = null, tab: AnalysisScreenTab = AnalysisScreenTab.STATISTICS) {
         _selectedCustomerIdForDetails.value = null
-        _selectedAnalysisTab.value = AnalysisScreenTab.ANALYSIS_CENTER
+        _selectedAnalysisTab.value = tab
         if (customer != null) {
             _selectedStatementCustomer.value = customer
         } else if (_selectedHomeCustomer.value != null) {
             _selectedStatementCustomer.value = _selectedHomeCustomer.value
         }
-        _currentDestination.value = ScreenDestination.STATEMENTS
+        _currentDestination.value = ScreenDestination.ANALYSIS_CENTER
     }
 
     fun openStatementsForCustomer(customer: Customer) {
@@ -799,7 +862,7 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         _selectedStatementCustomer.value = customer
         _statementSearchQuery.value = ""
         selectedTxTypeFilter.value = null
-        _currentDestination.value = ScreenDestination.STATEMENTS
+        _currentDestination.value = ScreenDestination.ANALYSIS_CENTER
     }
 
     fun setProductSearchQuery(query: String) {
@@ -1036,28 +1099,50 @@ class ShopViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun submitQuickPayment(customer: Customer, amount: Money, note: String) {
+    fun submitQuickPayment(customer: Customer?, amount: Money, mode: SettlementMode, partialCash: Money, note: String) {
         if (_isSubmitting.value) return
         _isSubmitting.value = true
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val previousDebt = customerDebtsMap.value[customer.id] ?: Money.ZERO
-                val result = repository.recordPayment(customer.id, amount, note)
+                val previousDebt = customer?.let { customerDebtsMap.value[it.id] } ?: Money.ZERO
+                val result = repository.createQuickSettlement(
+                    customerId = customer?.id,
+                    amount = amount,
+                    mode = mode,
+                    partialPaid = partialCash,
+                    note = note
+                )
                 result.onSuccess {
-                    val newDebt = if (previousDebt > amount) previousDebt - amount else Money.ZERO
-                    _quickPaymentSuccessData.value = QuickPaymentSuccessData(
-                        customer = customer,
-                        paidAmount = amount,
-                        previousDebt = previousDebt,
-                        newDebt = newDebt
-                    )
-                    _uiEvents.emit(if (_currentLanguage.value == AppLanguage.ARABIC) "تم تسجيل الدفعة النقدية بنجاح!" else "Payment recorded successfully!")
+                    // Debt increases by whatever portion isn't paid now; Full Cash adds none.
+                    val debtAdded = when (mode) {
+                        SettlementMode.FULL_CASH -> Money.ZERO
+                        SettlementMode.FULL_DEBT -> amount
+                        SettlementMode.PARTIAL -> if (amount > partialCash) amount - partialCash else Money.ZERO
+                    }
+                    val cashNow = when (mode) {
+                        SettlementMode.FULL_CASH -> amount
+                        SettlementMode.FULL_DEBT -> Money.ZERO
+                        SettlementMode.PARTIAL -> partialCash
+                    }
+                    if (customer != null) {
+                        _quickPaymentSuccessData.value = QuickPaymentSuccessData(
+                            customer = customer,
+                            totalAmount = amount,
+                            mode = mode,
+                            cashPortion = cashNow,
+                            previousDebt = previousDebt,
+                            newDebt = previousDebt + debtAdded
+                        )
+                    }
+                    _quickSettlementMode.value = SettlementMode.FULL_DEBT
+                    _quickPartialCashAmount.value = ""
+                    _uiEvents.emit(if (_currentLanguage.value == AppLanguage.ARABIC) "تم تسجيل العملية بنجاح!" else "Recorded successfully!")
                 }.onFailure { err ->
-                    _uiEvents.emit(err.message ?: "Payment error")
+                    _uiEvents.emit(err.message ?: "Error recording entry")
                 }
             } catch (e: Exception) {
-                _uiEvents.emit(e.message ?: "Payment error")
+                _uiEvents.emit(e.message ?: "Error recording entry")
             } finally {
                 _isLoading.value = false
                 _isSubmitting.value = false

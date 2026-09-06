@@ -115,12 +115,26 @@ data class FinancialSummary(
     val todayCashPurchases: Money = Money.ZERO
 )
 
+// Notifications only ever reference a transaction (Record Transaction / Payment events).
+// No title/message/customer is stored here — see NotificationDisplay for resolved content.
 data class AppNotification(
     val id: Long = 0,
-    val title: String,
-    val message: String,
-    val type: String, // purchase, payment, customer, system
-    val customerId: Long? = null,
-    val isRead: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val transactionId: Long,
+    val createdAt: Long = System.currentTimeMillis(),
+    val readAt: Long? = null
+) {
+    val isRead: Boolean get() = readAt != null
+}
+
+// Read-model built by joining a notification with its Transaction (and customer name)
+// at display time, so notification text always reflects the transaction's current data.
+data class NotificationDisplay(
+    val id: Long,
+    val transactionId: Long,
+    val createdAt: Long,
+    val isRead: Boolean,
+    val transactionType: String,
+    val amount: Money,
+    val customerId: Long?,
+    val customerName: String?
 )

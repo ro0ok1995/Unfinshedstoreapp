@@ -34,6 +34,30 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+// Notifications now reference a transaction instead of storing their own copy of
+// title/message/type/customer — see Entities.kt for why. Old notification history
+// (which had no transaction to link to) can't be carried forward meaningfully, so
+// this migration rebuilds the table empty; it holds no source-of-truth data, only
+// display history, so this is safe.
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS notifications")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `notifications` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `transaction_id` INTEGER NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                `read_at` INTEGER,
+                FOREIGN KEY(`transaction_id`) REFERENCES `transactions`(`id`) ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_notifications_transaction_id` ON `notifications` (`transaction_id`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_notifications_created_at` ON `notifications` (`created_at`)")
+    }
+}
+
 @Database(
     entities = [
         CustomerEntity::class,
@@ -43,7 +67,7 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         SettingsEntity::class,
         NotificationEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -64,7 +88,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "shop_accounts.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                 INSTANCE = instance
                 instance

@@ -14,6 +14,7 @@ import com.example.core.model.Money
 import com.example.core.model.Product
 import com.example.core.model.ProductStatus
 import com.example.core.model.Settings
+import com.example.core.model.SettlementMode
 import com.example.core.model.Transaction
 import com.example.core.model.TransactionItem
 import com.example.core.model.TransactionStatus
@@ -84,18 +85,8 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
         }
 
         val id = customerDao.insertCustomer(entity)
-        if (customer.id == 0L) {
-            notificationDao.insertNotification(
-                NotificationEntity(
-                    title = "زبون جديد",
-                    message = "تمت إضافة الزبون ${customer.name} إلى قائمة الحسابات",
-                    type = "customer",
-                    customerId = id,
-                    isRead = false,
-                    createdAt = now
-                )
-            )
-        }
+        // No notification here: the reference limits notification events to
+        // Record Transaction and Payment only — a new customer is not one of them.
         return Result.success(if (customer.id == 0L) id else customer.id)
     }
 
@@ -331,16 +322,8 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
                 }
                 transactionDao.insertTransactionItems(itemEntities)
 
-                val formattedTotal = totalMoney.format()
                 notificationDao.insertNotification(
-                    NotificationEntity(
-                        title = "فاتورة شراء نقدي",
-                        message = if (customerName.isNotBlank()) "تم تسجيل عملية شراء نقدية بقيمة $formattedTotal للزبون $customerName" else "تم تسجيل عملية شراء نقدية بقيمة $formattedTotal",
-                        type = "cash_purchase",
-                        customerId = customerId,
-                        isRead = false,
-                        createdAt = now
-                    )
+                    NotificationEntity(transactionId = txId, createdAt = now)
                 )
 
                 txId
@@ -370,16 +353,8 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
                 }
                 transactionDao.insertTransactionItems(itemEntities)
 
-                val formattedTotal = totalMoney.format()
                 notificationDao.insertNotification(
-                    NotificationEntity(
-                        title = "فاتورة شراء آجل",
-                        message = "تم تسجيل مشتريات آجلة بقيمة $formattedTotal للزبون $customerName",
-                        type = "purchase",
-                        customerId = customerId,
-                        isRead = false,
-                        createdAt = now
-                    )
+                    NotificationEntity(transactionId = txId, createdAt = now)
                 )
 
                 txId
@@ -427,18 +402,11 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
                 )
                 transactionDao.insertTransaction(paymentEntity)
 
-                val remainingMinor = totalMinor - paidAmount.minorUnits
-                val remainingMoney = Money.fromMinorUnits(remainingMinor)
-
+                // One notification for the settlement event, linked to the purchase
+                // transaction; amount/remaining are derived from it and the linked
+                // payment when displayed, not stored here.
                 notificationDao.insertNotification(
-                    NotificationEntity(
-                        title = "فاتورة شراء مع دفعة نقدية",
-                        message = "تم تسجيل شراء بقيمة ${totalMoney.format()}، استلام نقدي ${paidAmount.format()}، والمتبقي دين ${remainingMoney.format()} للزبون $customerName",
-                        type = "purchase",
-                        customerId = customerId,
-                        isRead = false,
-                        createdAt = now
-                    )
+                    NotificationEntity(transactionId = purchaseTxId, createdAt = now)
                 )
 
                 purchaseTxId
@@ -487,16 +455,110 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
 
         val txId = transactionDao.insertTransaction(txEntity)
         notificationDao.insertNotification(
-            NotificationEntity(
-                title = "سداد دفعة نقدية",
-                message = "تم تسجيل دفعة بقيمة ${amount.format()} من الزبون ${customer.name}",
-                type = "payment",
-                customerId = customerId,
-                isRead = false,
-                createdAt = now
-            )
+            NotificationEntity(transactionId = txId, createdAt = now)
         )
         txId
+    }
+
+    /**
+     * Quick Payment / simple "customer + amount + settlement" entry — no cart, no
+     * product line items. Mirrors createPurchase's settlement branches exactly so
+     * both entry points share one settlement model, per the reference.
+     */
+    override suspend fun createQuickSettlement(
+        customerId: Long?,
+        amount: Money,
+        mode: SettlementMode,
+        partialPaid: Money,
+        note: String
+    ): Result<Long> = runCatching {
+        if (!amount.isPositive()) {
+            throw IllegalArgumentException("Amount must be greater than zero.")
+        }
+
+        val isCredit = mode != SettlementMode.FULL_CASH
+        if (isCredit) {
+            if (customerId == null) {
+                throw IllegalArgumentException("A customer must be selected for debt or partial settlement.")
+            }
+            val customer = customerDao.getCustomerById(customerId)
+                ?: throw IllegalStateException("Customer with ID $customerId does not exist.")
+            if (customer.status != CustomerStatus.ACTIVE) {
+                throw IllegalStateException("Cannot record a debt/partial entry for an archived or deleted customer.")
+            }
+        }
+
+        if (mode == SettlementMode.PARTIAL) {
+            if (!partialPaid.isPositive() || partialPaid >= amount) {
+                throw IllegalArgumentException("Partial cash amount must be greater than zero and less than the total.")
+            }
+        }
+
+        val now = System.currentTimeMillis()
+
+        database.withTransaction {
+            when (mode) {
+                SettlementMode.FULL_CASH -> {
+                    val txEntity = com.example.data.db.TransactionEntity(
+                        customerId = customerId,
+                        type = TransactionType.CASH_PURCHASE,
+                        totalAmount = amount.minorUnits,
+                        status = TransactionStatus.COMPLETED,
+                        note = note.trim(),
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                    val txId = transactionDao.insertTransaction(txEntity)
+                    notificationDao.insertNotification(NotificationEntity(transactionId = txId, createdAt = now))
+                    txId
+                }
+                SettlementMode.FULL_DEBT -> {
+                    val txEntity = com.example.data.db.TransactionEntity(
+                        customerId = customerId,
+                        type = TransactionType.CREDIT_PURCHASE,
+                        totalAmount = amount.minorUnits,
+                        status = TransactionStatus.COMPLETED,
+                        note = note.trim(),
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                    val txId = transactionDao.insertTransaction(txEntity)
+                    notificationDao.insertNotification(NotificationEntity(transactionId = txId, createdAt = now))
+                    txId
+                }
+                SettlementMode.PARTIAL -> {
+                    val creditEntity = com.example.data.db.TransactionEntity(
+                        customerId = customerId,
+                        type = TransactionType.CREDIT_PURCHASE,
+                        totalAmount = amount.minorUnits,
+                        status = TransactionStatus.COMPLETED,
+                        note = note.trim(),
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                    val creditTxId = transactionDao.insertTransaction(creditEntity)
+
+                    val paymentNote = if (note.trim().isNotBlank()) {
+                        "دفعة نقدية مع القيد #$creditTxId (${note.trim()})"
+                    } else {
+                        "دفعة نقدية مع القيد #$creditTxId"
+                    }
+                    val paymentEntity = com.example.data.db.TransactionEntity(
+                        customerId = customerId,
+                        type = TransactionType.PAYMENT,
+                        totalAmount = partialPaid.minorUnits,
+                        status = TransactionStatus.COMPLETED,
+                        note = paymentNote,
+                        createdAt = now + 1,
+                        updatedAt = now + 1
+                    )
+                    transactionDao.insertTransaction(paymentEntity)
+
+                    notificationDao.insertNotification(NotificationEntity(transactionId = creditTxId, createdAt = now))
+                    creditTxId
+                }
+            }
+        }
     }
 
     override suspend fun cancelTransaction(
@@ -639,11 +701,17 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
     }
 
     override suspend fun markNotificationAsRead(id: Long): Result<Unit> = runCatching {
-        notificationDao.markAsRead(id)
+        notificationDao.markAsRead(id, System.currentTimeMillis())
+    }
+
+    override suspend fun markNotificationsAsRead(ids: List<Long>): Result<Unit> = runCatching {
+        if (ids.isNotEmpty()) {
+            notificationDao.markManyAsRead(ids, System.currentTimeMillis())
+        }
     }
 
     override suspend fun markAllNotificationsAsRead(): Result<Unit> = runCatching {
-        notificationDao.markAllAsRead()
+        notificationDao.markAllAsRead(System.currentTimeMillis())
     }
 
     override suspend fun deleteNotification(id: Long): Result<Unit> = runCatching {
@@ -760,7 +828,7 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
                 )
 
                 // Payment for c1
-                transactionDao.insertTransaction(
+                val payTx1 = transactionDao.insertTransaction(
                     Transaction(
                         customerId = c1,
                         type = TransactionType.PAYMENT,
@@ -771,26 +839,12 @@ class ShopRepository(private val database: AppDatabase) : IShopRepository {
                     ).toEntity()
                 )
 
-                // Seed Notifications
+                // Seed notifications — linked to the transactions above, no duplicated text.
                 notificationDao.insertNotification(
-                    NotificationEntity(
-                        title = "فاتورة شراء آجل",
-                        message = "تم تسجيل مشتريات آجلة بقيمة 85 ₪ للزبون أحمد خليل",
-                        type = "purchase",
-                        customerId = c1,
-                        isRead = false,
-                        createdAt = System.currentTimeMillis() - 86400000L * 3
-                    )
+                    NotificationEntity(transactionId = tx1, createdAt = System.currentTimeMillis() - 86400000L * 3)
                 )
                 notificationDao.insertNotification(
-                    NotificationEntity(
-                        title = "سداد دفعة نقدية",
-                        message = "تم تسجيل دفعة بقيمة 30 ₪ من الزبون أحمد خليل",
-                        type = "payment",
-                        customerId = c1,
-                        isRead = false,
-                        createdAt = System.currentTimeMillis() - 86400000L
-                    )
+                    NotificationEntity(transactionId = payTx1, createdAt = System.currentTimeMillis() - 86400000L)
                 )
 
                 // Default Settings

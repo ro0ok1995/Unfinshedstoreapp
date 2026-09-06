@@ -104,7 +104,17 @@ interface Strings {
     val startDateLabel: String
     val endDateLabel: String
     val tabAnalysisCenter: String
+    val tabStatistics: String
     val tabAccountStatement: String
+    val tabReports: String
+    val moreStoreInfo: String
+    val moreStoreInfoDesc: String
+    val moreAppSettings: String
+    val moreAppSettingsDesc: String
+    val moreDataCenter: String
+    val moreDataCenterDesc: String
+    val moreAbout: String
+    val moreAboutDesc: String
     val sectionOverview: String
     val sectionFinancialStats: String
     val sectionCustomerDebt: String
@@ -560,8 +570,18 @@ object ArabicStrings : Strings {
     override val selectDateRange = "تحديد النطاق الزمني"
     override val startDateLabel = "تاريخ البدء"
     override val endDateLabel = "تاريخ الانتهاء"
-    override val tabAnalysisCenter = "مركز التحليل والإحصائيات"
-    override val tabAccountStatement = "كشف الحساب والسجلات"
+    override val tabAnalysisCenter = "مركز التحليل"
+    override val tabStatistics = "الإحصائيات"
+    override val tabAccountStatement = "كشف الحساب"
+    override val tabReports = "التقارير"
+    override val moreStoreInfo = "معلومات المحل"
+    override val moreStoreInfoDesc = "تعديل اسم المحل، المالك، الهاتف، العنوان والعملة"
+    override val moreAppSettings = "إعدادات التطبيق"
+    override val moreAppSettingsDesc = "المظهر، اللغة، الإشعارات وتفضيلات العرض"
+    override val moreDataCenter = "مركز البيانات"
+    override val moreDataCenterDesc = "النسخ الاحتياطي، الاستعادة، التصدير وإدارة البيانات"
+    override val moreAbout = "حول التطبيق"
+    override val moreAboutDesc = "معلومات الإصدار، المطور، وحالة النظام"
     override val sectionOverview = "نظرة عامة"
     override val sectionFinancialStats = "الإحصائيات المالية"
     override val sectionCustomerDebt = "ديون الزبائن"
@@ -1011,8 +1031,18 @@ object EnglishStrings : Strings {
     override val selectDateRange = "Select Date Range"
     override val startDateLabel = "Start Date"
     override val endDateLabel = "End Date"
-    override val tabAnalysisCenter = "Analysis & Statistics"
+    override val tabAnalysisCenter = "Analysis Center"
+    override val tabStatistics = "Statistics"
     override val tabAccountStatement = "Account Statement"
+    override val tabReports = "Reports"
+    override val moreStoreInfo = "Store Information"
+    override val moreStoreInfoDesc = "Edit store name, owner, phone, address, and currency"
+    override val moreAppSettings = "App Settings"
+    override val moreAppSettingsDesc = "Theme, language, notifications, and display preferences"
+    override val moreDataCenter = "Data Center"
+    override val moreDataCenterDesc = "Backup, restore, export, and database management"
+    override val moreAbout = "About"
+    override val moreAboutDesc = "Version details, developer info, and system status"
     override val sectionOverview = "Overview"
     override val sectionFinancialStats = "Financial Statistics"
     override val sectionCustomerDebt = "Customer Debt"

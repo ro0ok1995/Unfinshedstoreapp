@@ -377,21 +377,6 @@ fun CustomerDetailsScreen(
                 )
             }
 
-            // CARD 2.5: Analysis Center for this customer
-            item {
-                PrimaryActionCard(
-                    icon = Icons.Default.BarChart,
-                    iconTint = themeColors.primary,
-                    iconContainerColor = themeColors.primaryContainer,
-                    title = strings.tabAnalysisCenter,
-                    subtitle = "عرض المؤشرات والرسوم البيانية لحساب ${customer.name}",
-                    onClick = {
-                        viewModel.openAnalysisCenter(customer)
-                    },
-                    testTag = "card_action_view_customer_analysis"
-                )
-            }
-
             // CARD 3: Record Payment -> Open Modal Payment Dialog with calm green accent
             item {
                 PrimaryActionCard(
@@ -402,21 +387,6 @@ fun CustomerDetailsScreen(
                     subtitle = if (customerDebt.isPositive()) strings.recordPaymentDesc else strings.accountFullyPaid,
                     onClick = { viewModel.openQuickPayment(customer) },
                     testTag = "card_action_record_payment"
-                )
-            }
-
-            // CARD 4: Set as Home Context -> Focus home dashboard on this customer
-            item {
-                PrimaryActionCard(
-                    icon = Icons.Default.Assessment,
-                    iconTint = themeColors.primary,
-                    iconContainerColor = themeColors.primaryContainer,
-                    title = strings.setAsHomeCustomer,
-                    subtitle = strings.homeCustomerMode,
-                    onClick = {
-                        viewModel.setCustomerAsHomeContext(customer)
-                    },
-                    testTag = "card_action_set_home_context"
                 )
             }
         }

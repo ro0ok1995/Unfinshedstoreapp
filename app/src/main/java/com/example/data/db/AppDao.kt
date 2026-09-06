@@ -211,10 +211,12 @@ interface SettingsDao {
 
 @Dao
 interface NotificationDao {
-    @Query("SELECT * FROM notifications ORDER BY created_at DESC")
+    // Latest 50, newest first — a UI display limit per the reference (not DB retention),
+    // enforced here so the badge/list never has to trim a larger result set.
+    @Query("SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50")
     fun getAllNotificationsFlow(): Flow<List<NotificationEntity>>
 
-    @Query("SELECT COUNT(*) FROM notifications WHERE is_read = 0")
+    @Query("SELECT COUNT(*) FROM notifications WHERE read_at IS NULL")
     fun getUnreadCountFlow(): Flow<Int>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -223,11 +225,16 @@ interface NotificationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(notifications: List<NotificationEntity>)
 
-    @Query("UPDATE notifications SET is_read = 1 WHERE id = :id")
-    suspend fun markAsRead(id: Long)
+    @Query("UPDATE notifications SET read_at = :readAt WHERE id = :id AND read_at IS NULL")
+    suspend fun markAsRead(id: Long, readAt: Long)
 
-    @Query("UPDATE notifications SET is_read = 1")
-    suspend fun markAllAsRead()
+    // Used when an item is actually seen while the list is open (viewport-based),
+    // not merely inserted or listed.
+    @Query("UPDATE notifications SET read_at = :readAt WHERE id IN (:ids) AND read_at IS NULL")
+    suspend fun markManyAsRead(ids: List<Long>, readAt: Long)
+
+    @Query("UPDATE notifications SET read_at = :readAt WHERE read_at IS NULL")
+    suspend fun markAllAsRead(readAt: Long)
 
     @Query("DELETE FROM notifications WHERE id = :id")
     suspend fun deleteNotification(id: Long)

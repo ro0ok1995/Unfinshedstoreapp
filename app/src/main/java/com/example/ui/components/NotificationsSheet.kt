@@ -1,7 +1,6 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,10 +25,9 @@ import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -44,7 +44,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,7 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.core.model.AppNotification
+import com.example.core.model.NotificationDisplay
+import com.example.core.model.TransactionType
 import com.example.data.localization.AppLanguage
 import com.example.data.localization.LocalAppLanguage
 import com.example.data.localization.LocalStrings
@@ -63,9 +67,13 @@ import com.example.ui.theme.FinancialDebt
 import com.example.ui.theme.FinancialPayment
 import com.example.ui.theme.LocalAppThemeColors
 import com.example.ui.viewmodel.ShopViewModel
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+// Badge rule from the reference: hidden at zero, exact for 1-9, "+9" for 10 or more.
+private fun formatBadgeCount(count: Int): String = if (count > 9) "+9" else "$count"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,8 +88,28 @@ fun NotificationsSheet(
     val isArabic = currentLang == AppLanguage.ARABIC
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    val notifications by viewModel.notificationDisplayItems.collectAsStateWithLifecycle()
     val unreadCount by viewModel.unreadNotificationCount.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+
+    // "An item becomes read only when actually viewed while the list is open" —
+    // watch which unread rows are actually on-screen and mark them read after a
+    // short dwell, rather than on insert/list or requiring an explicit tap.
+    LaunchedEffect(listState, notifications) {
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.map { it.key as? Long }
+        }.collect { visibleKeys ->
+            if (visibleKeys.isEmpty()) return@collect
+            delay(600)
+            val stillVisible = listState.layoutInfo.visibleItemsInfo.map { it.key as? Long }.toSet()
+            val toMark = notifications
+                .filter { !it.isRead && it.id in stillVisible && it.id in visibleKeys.toSet() }
+                .map { it.id }
+            if (toMark.isNotEmpty()) {
+                viewModel.markNotificationsAsRead(toMark)
+            }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -123,28 +151,26 @@ fun NotificationsSheet(
                         )
                     }
 
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = strings.notifications,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            if (unreadCount > 0) {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Surface(
-                                    color = FinancialDebt,
-                                    shape = CircleShape
-                                ) {
-                                    Text(
-                                        text = "$unreadCount",
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                    )
-                                }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = strings.notifications,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (unreadCount > 0) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                color = FinancialDebt,
+                                shape = CircleShape
+                            ) {
+                                Text(
+                                    text = formatBadgeCount(unreadCount),
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
                             }
                         }
                     }
@@ -228,6 +254,7 @@ fun NotificationsSheet(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(380.dp),
@@ -254,7 +281,6 @@ fun NotificationsSheet(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Clear All Button
                 OutlinedButton(
                     onClick = { viewModel.clearAllNotifications() },
                     modifier = Modifier
@@ -282,9 +308,14 @@ fun NotificationsSheet(
     }
 }
 
+/**
+ * Title/message are built here from the resolved Transaction (type, amount,
+ * customer name) rather than read from stored text — the notification row itself
+ * only ever holds a transaction_id, created_at and read_at.
+ */
 @Composable
 private fun NotificationCardItem(
-    notification: AppNotification,
+    notification: NotificationDisplay,
     isArabic: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
@@ -293,28 +324,55 @@ private fun NotificationCardItem(
     val themeColors = LocalAppThemeColors.current
     val strings = LocalStrings.current
 
-    val iconVector = when (notification.type) {
-        "purchase" -> Icons.Default.ShoppingCart
-        "cash_purchase" -> Icons.Default.ShoppingCart
-        "payment" -> Icons.Default.AccountBalanceWallet
-        "customer" -> Icons.Default.Person
-        else -> Icons.Default.Info
+    val iconVector = when (notification.transactionType) {
+        TransactionType.CASH_PURCHASE -> Icons.Default.ShoppingCart
+        TransactionType.CREDIT_PURCHASE -> Icons.Default.ShoppingCart
+        TransactionType.PAYMENT -> Icons.Default.AccountBalanceWallet
+        else -> Icons.Default.Payments
     }
 
-    val iconTint = when (notification.type) {
-        "purchase" -> FinancialDebt
-        "cash_purchase" -> themeColors.primary
-        "payment" -> FinancialPayment
-        "customer" -> themeColors.primary
+    val iconTint = when (notification.transactionType) {
+        TransactionType.CREDIT_PURCHASE -> FinancialDebt
+        TransactionType.CASH_PURCHASE -> themeColors.primary
+        TransactionType.PAYMENT -> FinancialPayment
         else -> themeColors.primary
     }
 
     val iconBg = iconTint.copy(alpha = 0.12f)
 
-    val dateFormat = SimpleDateFormat(
-        if (isArabic) "yyyy/MM/dd - hh:mm a" else "MMM dd, yyyy - hh:mm a",
-        if (isArabic) Locale("ar") else Locale.getDefault()
-    )
+    val title = when (notification.transactionType) {
+        TransactionType.CASH_PURCHASE -> if (isArabic) "فاتورة شراء نقدي" else "Cash purchase"
+        TransactionType.CREDIT_PURCHASE -> if (isArabic) "فاتورة شراء آجل" else "Credit purchase"
+        TransactionType.PAYMENT -> if (isArabic) "دفعة مستلمة" else "Payment received"
+        else -> if (isArabic) "معاملة" else "Transaction"
+    }
+
+    val message = remember(notification.transactionType, notification.amount, notification.customerName, isArabic) {
+        val formattedAmount = notification.amount.format()
+        val name = notification.customerName
+        if (isArabic) {
+            when (notification.transactionType) {
+                TransactionType.CASH_PURCHASE -> if (name != null) "تم تسجيل عملية شراء نقدية بقيمة $formattedAmount للزبون $name" else "تم تسجيل عملية شراء نقدية بقيمة $formattedAmount"
+                TransactionType.CREDIT_PURCHASE -> if (name != null) "تم تسجيل مشتريات آجلة بقيمة $formattedAmount للزبون $name" else "تم تسجيل مشتريات آجلة بقيمة $formattedAmount"
+                TransactionType.PAYMENT -> if (name != null) "تم تسجيل دفعة بقيمة $formattedAmount من الزبون $name" else "تم تسجيل دفعة بقيمة $formattedAmount"
+                else -> formattedAmount
+            }
+        } else {
+            when (notification.transactionType) {
+                TransactionType.CASH_PURCHASE -> if (name != null) "Cash purchase of $formattedAmount recorded for $name" else "Cash purchase of $formattedAmount recorded"
+                TransactionType.CREDIT_PURCHASE -> if (name != null) "Credit purchase of $formattedAmount recorded for $name" else "Credit purchase of $formattedAmount recorded"
+                TransactionType.PAYMENT -> if (name != null) "Payment of $formattedAmount received from $name" else "Payment of $formattedAmount received"
+                else -> formattedAmount
+            }
+        }
+    }
+
+    val dateFormat = remember(isArabic) {
+        SimpleDateFormat(
+            if (isArabic) "yyyy/MM/dd - hh:mm a" else "MMM dd, yyyy - hh:mm a",
+            if (isArabic) Locale("ar") else Locale.getDefault()
+        )
+    }
     val timeFormatted = dateFormat.format(Date(notification.createdAt))
 
     Card(
@@ -342,7 +400,6 @@ private fun NotificationCardItem(
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Icon
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -358,7 +415,6 @@ private fun NotificationCardItem(
                 )
             }
 
-            // Content
             Column(
                 modifier = Modifier.weight(1f)
             ) {
@@ -368,7 +424,7 @@ private fun NotificationCardItem(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = notification.title,
+                        text = title,
                         fontWeight = if (!notification.isRead) FontWeight.Bold else FontWeight.SemiBold,
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -390,7 +446,7 @@ private fun NotificationCardItem(
                 Spacer(modifier = Modifier.height(3.dp))
 
                 Text(
-                    text = notification.message,
+                    text = message,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
@@ -431,7 +487,6 @@ private fun NotificationCardItem(
                 }
             }
 
-            // Delete IconButton
             IconButton(
                 onClick = onDelete,
                 modifier = Modifier

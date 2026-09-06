@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -90,6 +91,7 @@ import com.example.ui.components.CancelTransactionDialog
 import com.example.ui.components.RestoreTransactionDialog
 import com.example.ui.components.StatusBadge
 import com.example.ui.screens.analysis.AnalysisCenterContent
+import com.example.ui.screens.analysis.ReportsFlowContent
 import com.example.ui.theme.LocalAppThemeColors
 import com.example.ui.theme.FinancialCancelled
 import com.example.ui.theme.FinancialCancelledContainer
@@ -105,7 +107,8 @@ import com.example.ui.viewmodel.ShopViewModel
 @Composable
 fun StatementsScreen(
     viewModel: ShopViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenDrawer: () -> Unit = {}
 ) {
     val strings = LocalStrings.current
     val themeColors = LocalAppThemeColors.current
@@ -132,15 +135,17 @@ fun StatementsScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             // Header
             AppHeader(
-                title = if (selectedCustomer != null) {
-                    "${strings.customerAccountStatement}: ${selectedCustomer?.name}"
-                } else {
-                    strings.statementsTitle
-                },
-                subtitle = if (selectedCustomer != null) {
-                    selectedCustomer?.formattedPhoneWithCode?.ifBlank { strings.viewAccountStatementDesc } ?: strings.viewAccountStatementDesc
-                } else {
-                    "${financialMetrics.totalTransactionsCount} ${strings.allTransactions}"
+                title = strings.tabAnalysisCenter,
+                subtitle = when (selectedTab) {
+                    ShopViewModel.AnalysisScreenTab.STATISTICS -> strings.tabStatistics
+                    ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT -> {
+                        if (selectedCustomer != null) {
+                            "${strings.tabAccountStatement}: ${selectedCustomer?.name}"
+                        } else {
+                            "${strings.tabAccountStatement} • ${financialMetrics.totalTransactionsCount} ${strings.allTransactions}"
+                        }
+                    }
+                    ShopViewModel.AnalysisScreenTab.REPORTS -> strings.tabReports
                 },
                 onBack = if (selectedCustomer != null) {
                     {
@@ -148,6 +153,18 @@ fun StatementsScreen(
                         viewModel.setStatementSearchQuery("")
                     }
                 } else null,
+                navigationIcon = {
+                    IconButton(
+                        onClick = onOpenDrawer,
+                        modifier = Modifier.testTag("analysis_center_drawer_btn").size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = strings.drawerMore,
+                            tint = Color.White
+                        )
+                    }
+                },
                 actions = {
                     IconButton(
                         onClick = {
@@ -180,7 +197,7 @@ fun StatementsScreen(
                 }
             )
 
-            // Segmented Tab Switcher (Analysis Center vs Account Statement)
+            // Segmented Tab Switcher (Statistics | Account Statement | Reports)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -191,14 +208,14 @@ fun StatementsScreen(
                     )
                     .padding(4.dp)
             ) {
-                // Tab 1: Analysis Center
+                // Tab 1: Statistics
                 Surface(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable { viewModel.setSelectedAnalysisTab(ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) }
-                        .testTag("tab_analysis_center"),
-                    color = if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) themeColors.primary else Color.Transparent,
+                        .clickable { viewModel.setSelectedAnalysisTab(ShopViewModel.AnalysisScreenTab.STATISTICS) }
+                        .testTag("tab_statistics"),
+                    color = if (selectedTab == ShopViewModel.AnalysisScreenTab.STATISTICS) themeColors.primary else Color.Transparent,
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Row(
@@ -209,15 +226,15 @@ fun StatementsScreen(
                         Icon(
                             imageVector = Icons.Default.Assessment,
                             contentDescription = null,
-                            tint = if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            tint = if (selectedTab == ShopViewModel.AnalysisScreenTab.STATISTICS) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(17.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = strings.tabAnalysisCenter,
-                            fontSize = 13.sp,
-                            fontWeight = if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            text = strings.tabStatistics,
+                            fontSize = 12.sp,
+                            fontWeight = if (selectedTab == ShopViewModel.AnalysisScreenTab.STATISTICS) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selectedTab == ShopViewModel.AnalysisScreenTab.STATISTICS) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -241,29 +258,62 @@ fun StatementsScreen(
                             imageVector = Icons.Default.ReceiptLong,
                             contentDescription = null,
                             tint = if (selectedTab == ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = strings.tabAccountStatement,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             fontWeight = if (selectedTab == ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT) FontWeight.Bold else FontWeight.Normal,
                             color = if (selectedTab == ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
+
+                // Tab 3: Reports
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { viewModel.setSelectedAnalysisTab(ShopViewModel.AnalysisScreenTab.REPORTS) }
+                        .testTag("tab_reports"),
+                    color = if (selectedTab == ShopViewModel.AnalysisScreenTab.REPORTS) themeColors.primary else Color.Transparent,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PictureAsPdf,
+                            contentDescription = null,
+                            tint = if (selectedTab == ShopViewModel.AnalysisScreenTab.REPORTS) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = strings.tabReports,
+                            fontSize = 12.sp,
+                            fontWeight = if (selectedTab == ShopViewModel.AnalysisScreenTab.REPORTS) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selectedTab == ShopViewModel.AnalysisScreenTab.REPORTS) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
 
-            if (selectedTab == ShopViewModel.AnalysisScreenTab.ANALYSIS_CENTER) {
-                AnalysisCenterContent(
-                    viewModel = viewModel,
-                    selectedCustomer = selectedCustomer
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 100.dp)
-                ) {
+            when (selectedTab) {
+                ShopViewModel.AnalysisScreenTab.STATISTICS -> {
+                    AnalysisCenterContent(
+                        viewModel = viewModel,
+                        selectedCustomer = selectedCustomer
+                    )
+                }
+                ShopViewModel.AnalysisScreenTab.ACCOUNT_STATEMENT -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 100.dp)
+                    ) {
                 // Section 1: Customer Search & Selector
                 item {
                     Column(
@@ -751,6 +801,12 @@ fun StatementsScreen(
                         )
                     }
                 }
+            }
+            ShopViewModel.AnalysisScreenTab.REPORTS -> {
+                ReportsFlowContent(
+                    viewModel = viewModel,
+                    initialCustomer = selectedCustomer
+                )
             }
         }
     }

@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Payments
@@ -39,6 +40,8 @@ import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -129,6 +132,16 @@ fun HomeScreen(
     val themeColors = LocalAppThemeColors.current
 
     var showAddCustomerDialog by remember { mutableStateOf(false) }
+    var showCustomerFilterMenu by remember { mutableStateOf(false) }
+    var filterDebtOnly by remember { mutableStateOf(false) }
+
+    val searchDisplayList = remember(customersWithDebt, filterDebtOnly) {
+        if (filterDebtOnly) {
+            customersWithDebt.filter { it.outstandingDebt.minorUnits > 0 }
+        } else {
+            customersWithDebt
+        }
+    }
 
     Box(
         modifier = modifier
@@ -241,15 +254,62 @@ fun HomeScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Customer Search Bar
-                        SearchBar(
-                            query = searchQuery,
-                            onQueryChange = { viewModel.setCustomerSearchQuery(it) },
-                            placeholder = strings.searchCustomerHint,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("home_search_bar")
-                        )
+                        // Customer Search Bar with Filter Button
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SearchBar(
+                                query = searchQuery,
+                                onQueryChange = { viewModel.setCustomerSearchQuery(it) },
+                                placeholder = strings.searchCustomerHint,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("home_search_bar")
+                            )
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Box {
+                                IconButton(
+                                    onClick = { showCustomerFilterMenu = true },
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (filterDebtOnly) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.15f)
+                                        )
+                                        .testTag("home_filter_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.FilterList,
+                                        contentDescription = strings.status,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showCustomerFilterMenu,
+                                    onDismissRequest = { showCustomerFilterMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(strings.all) },
+                                        onClick = {
+                                            filterDebtOnly = false
+                                            showCustomerFilterMenu = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(strings.sectionCustomerDebt) },
+                                        onClick = {
+                                            filterDebtOnly = true
+                                            showCustomerFilterMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -427,91 +487,61 @@ fun HomeScreen(
             }
 
             // ==========================================
-            // 5. CUSTOMERS SECTION / SEARCH RESULTS
+            // 5. CUSTOMER SEARCH RESULTS (Only when searching)
             // ==========================================
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (searchQuery.isNotBlank()) strings.search else strings.customersList,
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 14.sp
-                        )
-                    )
-
-                    Text(
-                        text = "${customersWithDebt.size} ${strings.tabCustomers}",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    )
-                }
-            }
-
-            if (allActiveCustomers.isEmpty() && searchQuery.isBlank()) {
+            if (searchQuery.isNotBlank() || filterDebtOnly) {
                 item {
-                    NoCustomersEmptyState(
-                        onAddCustomer = { showAddCustomerDialog = true }
-                    )
-                }
-            } else if (customersWithDebt.isEmpty() && searchQuery.isNotBlank()) {
-                item {
-                    NoSearchResultsEmptyState(
-                        searchQuery = searchQuery,
-                        onClearSearch = { viewModel.setCustomerSearchQuery("") }
-                    )
-                }
-            } else {
-                // If searching, show all matches; otherwise show top 6 customers with fast expand to Accounts
-                val displayList = if (searchQuery.isNotBlank()) customersWithDebt else customersWithDebt.take(6)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = strings.search,
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 14.sp
+                            )
+                        )
 
-                itemsIndexed(
-                    items = displayList,
-                    key = { _, item -> item.customer.id }
-                ) { index, item ->
-                    CustomerCard(
-                        serialNumber = index + 1,
-                        customerWithDebt = item,
-                        onClick = {
-                            viewModel.selectHomeCustomer(item.customer)
-                        }
-                    )
+                        Text(
+                            text = "${searchDisplayList.size} ${strings.tabCustomers}",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                    }
                 }
 
-                if (searchQuery.isBlank() && customersWithDebt.size > 6) {
+                if (searchDisplayList.isEmpty()) {
                     item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            OutlinedButton(
-                                onClick = { viewModel.navigateTo(com.example.ui.viewmodel.ScreenDestination.DATABASE) },
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text(
-                                    text = "${strings.all} (${customersWithDebt.size})",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Icon(
-                                    imageVector = Icons.Filled.ArrowForward,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                        NoSearchResultsEmptyState(
+                            searchQuery = searchQuery,
+                            onClearSearch = {
+                                viewModel.setCustomerSearchQuery("")
+                                filterDebtOnly = false
                             }
-                        }
+                        )
+                    }
+                } else {
+                    itemsIndexed(
+                        items = searchDisplayList,
+                        key = { _, item -> item.customer.id }
+                    ) { index, item ->
+                        CustomerCard(
+                            serialNumber = index + 1,
+                            customerWithDebt = item,
+                            onClick = {
+                                viewModel.selectHomeCustomer(item.customer)
+                                viewModel.setCustomerSearchQuery("")
+                                filterDebtOnly = false
+                            }
+                        )
                     }
                 }
             }

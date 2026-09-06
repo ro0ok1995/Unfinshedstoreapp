@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
@@ -158,7 +159,7 @@ fun DatabaseScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             AppHeader(
-                title = strings.databaseTitle,
+                title = if (activeTab == DbMainTab.CUSTOMERS) strings.navAccounts else strings.drawerDataCenter,
                 subtitle = if (activeTab == DbMainTab.CUSTOMERS) strings.tabCustomers else strings.tabProducts,
                 navigationIcon = {
                     IconButton(
@@ -170,8 +171,8 @@ fun DatabaseScreen(
                             .testTag("db_drawer_btn")
                     ) {
                         Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Default.MoreVert,
-                            contentDescription = strings.drawerMore,
+                            imageVector = Icons.Filled.Menu,
+                            contentDescription = strings.drawerSectionMain,
                             tint = Color.White,
                             modifier = Modifier.size(22.dp)
                         )

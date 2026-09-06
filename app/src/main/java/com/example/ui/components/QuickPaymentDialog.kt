@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,7 +60,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.core.model.Customer
 import com.example.core.model.Money
+import com.example.core.model.SettlementMode
 import com.example.data.localization.LocalStrings
+import com.example.ui.theme.FinancialCash
+import com.example.ui.theme.FinancialCashContainer
 import com.example.ui.theme.FinancialDebt
 import com.example.ui.theme.FinancialDebtContainer
 import com.example.ui.theme.FinancialPayment
@@ -66,9 +72,10 @@ import com.example.ui.viewmodel.QuickPaymentSuccessData
 import com.example.ui.viewmodel.ShopViewModel
 
 /**
- * Dedicated Quick Payment Dialog for settling customer debts.
- * Supports choosing customer with live debt search, real-time balance calculations,
- * "Pay All" quick action, double submission protection, and instant debt reduction.
+ * Quick Payment: the "customer + amount + settlement" entry point from the '+' menu
+ * (and from Customer Details -> Payment). Uses the exact same unified settlement
+ * model as the Purchases screen (Full Cash / Full Debt / Partial), just without a
+ * cart, per the master reference sections 11-12 and 16.
  */
 @Composable
 fun QuickPaymentDialog(
@@ -81,6 +88,8 @@ fun QuickPaymentDialog(
     val debtsMap by viewModel.customerDebtsMap.collectAsStateWithLifecycle()
     val targetCustomer by viewModel.quickPaymentTargetCustomer.collectAsStateWithLifecycle()
     val isSubmitting by viewModel.isSubmitting.collectAsStateWithLifecycle()
+    val settlementMode by viewModel.quickSettlementMode.collectAsStateWithLifecycle()
+    val partialCashText by viewModel.quickPartialCashAmount.collectAsStateWithLifecycle()
 
     var selectedCustomer by remember(targetCustomer) { mutableStateOf(targetCustomer) }
     var amountText by remember { mutableStateOf("") }
@@ -90,21 +99,31 @@ fun QuickPaymentDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val currentDebt = selectedCustomer?.let { debtsMap[it.id] } ?: Money.ZERO
-    val paymentAmount = remember(amountText) { Money.fromShekels(amountText) }
-    val remainingDebt = remember(currentDebt, paymentAmount) {
-        if (currentDebt > paymentAmount) currentDebt - paymentAmount else Money.ZERO
+    val totalAmount = remember(amountText) { Money.fromShekels(amountText) }
+    val partialCashMoney = remember(partialCashText) { Money.fromShekels(partialCashText) }
+
+    val isPartialValid = remember(settlementMode, partialCashMoney, totalAmount) {
+        settlementMode != SettlementMode.PARTIAL || (partialCashMoney.isPositive() && partialCashMoney < totalAmount)
     }
 
-    val filteredCustomers = remember(customers, searchQuery, debtsMap) {
+    val debtAddedByThisEntry = remember(settlementMode, totalAmount, partialCashMoney) {
+        when (settlementMode) {
+            SettlementMode.FULL_CASH -> Money.ZERO
+            SettlementMode.FULL_DEBT -> totalAmount
+            SettlementMode.PARTIAL -> if (totalAmount > partialCashMoney) totalAmount - partialCashMoney else Money.ZERO
+        }
+    }
+    val projectedDebt = remember(currentDebt, debtAddedByThisEntry) { currentDebt + debtAddedByThisEntry }
+
+    val filteredCustomers = remember(customers, searchQuery) {
         val query = searchQuery.trim()
-        val list = if (query.isBlank()) {
-            customers.filter { (debtsMap[it.id] ?: Money.ZERO).isPositive() }
+        if (query.isBlank()) {
+            customers
         } else {
             customers.filter {
                 it.name.contains(query, ignoreCase = true) || it.phone.contains(query, ignoreCase = true)
             }
         }
-        list.sortedByDescending { debtsMap[it.id] ?: Money.ZERO }
     }
 
     Dialog(onDismissRequest = { if (!isSubmitting) onDismiss() }) {
@@ -146,23 +165,14 @@ fun QuickPaymentDialog(
                                 )
                             }
                             Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = strings.quickPayment,
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 17.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                            Text(
+                                text = strings.quickPayment,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 17.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
-                                Text(
-                                    text = strings.recordPaymentTitle,
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 12.sp
-                                    )
-                                )
-                            }
+                            )
                         }
 
                         IconButton(
@@ -186,11 +196,10 @@ fun QuickPaymentDialog(
                 // Customer Selection Section
                 item {
                     if (selectedCustomer != null && !isSelectingCustomer) {
-                        // Customer Selected Card
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = FinancialDebtContainer.copy(alpha = 0.4f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, FinancialDebt.copy(alpha = 0.4f)),
+                            border = BorderStroke(1.dp, FinancialDebt.copy(alpha = 0.4f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -257,7 +266,6 @@ fun QuickPaymentDialog(
                             }
                         }
                     } else {
-                        // Customer Search & Selection Dropdown
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 text = strings.selectCustomerPrompt,
@@ -289,7 +297,7 @@ fun QuickPaymentDialog(
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = Color(0xFFF9F9FA),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE0E0E0)),
+                                border = BorderStroke(1.dp, Color(0xFFE0E0E0)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 if (filteredCustomers.isEmpty()) {
@@ -357,12 +365,12 @@ fun QuickPaymentDialog(
                     }
                 }
 
-                // Payment Inputs & Real-time balance calculation
+                // Amount + Settlement + Notes
                 if (selectedCustomer != null && !isSelectingCustomer) {
                     item {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             OutlinedTextField(
                                 value = amountText,
@@ -370,7 +378,7 @@ fun QuickPaymentDialog(
                                     amountText = it
                                     errorMessage = null
                                 },
-                                label = { Text(strings.paymentAmount + " (₪) *") },
+                                label = { Text(strings.totalAmount + " (₪) *") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -381,24 +389,75 @@ fun QuickPaymentDialog(
                                 isError = errorMessage != null
                             )
 
-                            // Quick "Pay All" Button
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
+                            // Settlement Mode — identical model/terminology to Purchases
+                            Text(
+                                text = strings.purchaseType,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = Color.DarkGray
+                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFFF9F9FA))
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                TextButton(
-                                    onClick = {
-                                        amountText = currentDebt.formatWithoutSymbol()
-                                        errorMessage = null
-                                    },
-                                    enabled = !isSubmitting && currentDebt.isPositive()
-                                ) {
-                                    Text(
-                                        text = strings.payFullDebt,
-                                        fontSize = 12.sp,
-                                        color = themeColors.primary,
-                                        fontWeight = FontWeight.Bold
+                                SettlementOptionRow(
+                                    selected = settlementMode == SettlementMode.FULL_DEBT,
+                                    accent = FinancialDebt,
+                                    accentContainer = FinancialDebtContainer,
+                                    title = strings.settlementFullDebt,
+                                    desc = strings.settlementFullDebtDesc,
+                                    enabled = !isSubmitting,
+                                    onSelect = { viewModel.setQuickSettlementMode(SettlementMode.FULL_DEBT) }
+                                )
+                                SettlementOptionRow(
+                                    selected = settlementMode == SettlementMode.FULL_CASH,
+                                    accent = FinancialCash,
+                                    accentContainer = FinancialCashContainer,
+                                    title = strings.settlementFullCash,
+                                    desc = strings.settlementFullCashDesc,
+                                    enabled = !isSubmitting,
+                                    onSelect = { viewModel.setQuickSettlementMode(SettlementMode.FULL_CASH) }
+                                )
+                                SettlementOptionRow(
+                                    selected = settlementMode == SettlementMode.PARTIAL,
+                                    accent = themeColors.primary,
+                                    accentContainer = themeColors.primaryContainer,
+                                    title = strings.settlementPartial,
+                                    desc = strings.settlementPartialDesc,
+                                    enabled = !isSubmitting,
+                                    onSelect = { viewModel.setQuickSettlementMode(SettlementMode.PARTIAL) }
+                                )
+
+                                if (settlementMode == SettlementMode.PARTIAL) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    OutlinedTextField(
+                                        value = partialCashText,
+                                        onValueChange = {
+                                            viewModel.setQuickPartialCashAmount(it)
+                                            errorMessage = null
+                                        },
+                                        label = { Text(strings.partialPaymentAmountPrompt) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("quick_payment_partial_cash_input"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        singleLine = true,
+                                        enabled = !isSubmitting,
+                                        isError = partialCashText.isNotBlank() && !isPartialValid
                                     )
+                                    if (partialCashText.isNotBlank() && !isPartialValid) {
+                                        Text(
+                                            text = strings.partialPaymentInvalid,
+                                            color = Color.Red,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                 }
                             }
 
@@ -419,25 +478,16 @@ fun QuickPaymentDialog(
                                         Text(text = strings.currentDebt, fontSize = 12.sp, color = Color.Gray)
                                         Text(text = currentDebt.format(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FinancialDebt)
                                     }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(text = strings.cashPurchase, fontSize = 12.sp, color = FinancialPayment, fontWeight = FontWeight.SemiBold)
-                                        Text(text = paymentAmount.format(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FinancialPayment)
-                                    }
                                     Divider(color = Color(0xFFE5E7EB), thickness = 0.5.dp)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(text = strings.newDebtLabel, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                        Text(text = remainingDebt.format(), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = if (remainingDebt.isPositive()) FinancialDebt else FinancialPayment)
+                                        Text(text = projectedDebt.format(), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = if (projectedDebt.isPositive()) FinancialDebt else FinancialPayment)
                                     }
                                 }
                             }
-
-                            Spacer(modifier = Modifier.height(2.dp))
 
                             OutlinedTextField(
                                 value = notesText,
@@ -486,8 +536,8 @@ fun QuickPaymentDialog(
 
                         val canSubmit = selectedCustomer != null &&
                             !isSelectingCustomer &&
-                            paymentAmount.isPositive() &&
-                            paymentAmount <= currentDebt &&
+                            totalAmount.isPositive() &&
+                            isPartialValid &&
                             !isSubmitting
 
                         Button(
@@ -496,15 +546,21 @@ fun QuickPaymentDialog(
                                     errorMessage = strings.selectCustomerPrompt
                                     return@Button
                                 }
-                                if (!paymentAmount.isPositive()) {
+                                if (!totalAmount.isPositive()) {
                                     errorMessage = strings.amountMustBeGreaterThanZero
                                     return@Button
                                 }
-                                if (paymentAmount > currentDebt) {
-                                    errorMessage = strings.paymentExceedsDebtError
+                                if (!isPartialValid) {
+                                    errorMessage = strings.partialPaymentInvalid
                                     return@Button
                                 }
-                                viewModel.submitQuickPayment(selectedCustomer!!, paymentAmount, notesText)
+                                viewModel.submitQuickPayment(
+                                    selectedCustomer,
+                                    totalAmount,
+                                    settlementMode,
+                                    partialCashMoney,
+                                    notesText
+                                )
                             },
                             enabled = canSubmit,
                             modifier = Modifier
@@ -536,9 +592,45 @@ fun QuickPaymentDialog(
     }
 }
 
+@Composable
+private fun SettlementOptionRow(
+    selected: Boolean,
+    accent: Color,
+    accentContainer: Color,
+    title: String,
+    desc: String,
+    enabled: Boolean,
+    onSelect: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) accentContainer.copy(alpha = 0.5f) else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onSelect)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = if (enabled) onSelect else null,
+            colors = RadioButtonDefaults.colors(selectedColor = accent)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Column {
+            Text(
+                text = title,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                color = if (selected) accent else Color.DarkGray
+            )
+            Text(text = desc, fontSize = 11.sp, color = Color.Gray)
+        }
+    }
+}
+
 /**
- * Success Dialog after quick payment is recorded.
- * Shows receipt summary: customer name, paid amount, previous debt, and new remaining balance.
+ * Success receipt after a Quick Payment entry is recorded.
  */
 @Composable
 fun QuickPaymentSuccessDialog(
@@ -581,7 +673,7 @@ fun QuickPaymentSuccessDialog(
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = Color(0xFFF9FAFB),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -592,17 +684,26 @@ fun QuickPaymentSuccessDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = strings.previousDebtLabel, fontSize = 12.sp, color = Color.Gray)
-                            Text(text = data.previousDebt.format(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = FinancialDebt)
+                            Text(text = strings.totalAmount, fontSize = 12.sp, color = Color.Gray)
+                            Text(text = data.totalAmount.format(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
+                        if (data.mode != SettlementMode.FULL_DEBT) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(text = strings.settlementFullCash, fontSize = 12.sp, color = FinancialPayment, fontWeight = FontWeight.Bold)
+                                Text(text = data.cashPortion.format(), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FinancialPayment)
+                            }
+                        }
+                        Divider(color = Color(0xFFE5E7EB), thickness = 0.5.dp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = strings.paymentAmount, fontSize = 12.sp, color = FinancialPayment, fontWeight = FontWeight.Bold)
-                            Text(text = data.paidAmount.format(), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FinancialPayment)
+                            Text(text = strings.previousDebtLabel, fontSize = 12.sp, color = Color.Gray)
+                            Text(text = data.previousDebt.format(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = FinancialDebt)
                         }
-                        Divider(color = Color(0xFFE5E7EB), thickness = 0.5.dp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween

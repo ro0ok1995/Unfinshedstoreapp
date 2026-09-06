@@ -8,6 +8,7 @@ import com.example.core.model.FinancialSummary
 import com.example.core.model.Money
 import com.example.core.model.Product
 import com.example.core.model.Settings
+import com.example.core.model.SettlementMode
 import com.example.core.model.Transaction
 import com.example.core.model.TransactionItem
 import com.example.core.model.TransactionWithDetails
@@ -81,6 +82,19 @@ interface TransactionRepository {
     ): Result<Long>
 
     /**
+     * Simple "customer + amount + settlement" entry with no product line items
+     * (Quick Payment). Uses the same unified settlement model as [createPurchase]:
+     * Full Cash, Full Debt, or Partial (cash now / remainder on the customer's account).
+     */
+    suspend fun createQuickSettlement(
+        customerId: Long?,
+        amount: Money,
+        mode: SettlementMode,
+        partialPaid: Money,
+        note: String
+    ): Result<Long>
+
+    /**
      * Reverses the financial effect of a transaction by setting status to CANCELLED.
      */
     suspend fun cancelTransaction(
@@ -112,6 +126,9 @@ interface NotificationRepository {
     val unreadNotificationCount: Flow<Int>
     suspend fun addNotification(notification: AppNotification): Result<Long>
     suspend fun markNotificationAsRead(id: Long): Result<Unit>
+    // Marks several as read at once — the "read while the list is open" case,
+    // where every currently-visible unread item becomes read together.
+    suspend fun markNotificationsAsRead(ids: List<Long>): Result<Unit>
     suspend fun markAllNotificationsAsRead(): Result<Unit>
     suspend fun deleteNotification(id: Long): Result<Unit>
     suspend fun clearAllNotifications(): Result<Unit>

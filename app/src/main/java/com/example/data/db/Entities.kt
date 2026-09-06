@@ -346,12 +346,22 @@ fun Settings.toEntity(): SettingsEntity = SettingsEntity(
     updatedAt = updatedAt
 )
 
+// Per master reference section 4/4.1: a notification is an approved relationship
+// concept that REFERENCES a transaction rather than duplicating its data.
+// Customer, amount and type are resolved from the linked Transaction at display time.
 @Entity(
     tableName = "notifications",
+    foreignKeys = [
+        ForeignKey(
+            entity = TransactionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["transaction_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
     indices = [
-        Index(value = ["is_read"]),
-        Index(value = ["created_at"]),
-        Index(value = ["customer_id"])
+        Index(value = ["transaction_id"]),
+        Index(value = ["created_at"])
     ]
 )
 data class NotificationEntity(
@@ -359,41 +369,26 @@ data class NotificationEntity(
     @ColumnInfo(name = "id")
     val id: Long = 0,
 
-    @ColumnInfo(name = "title")
-    val title: String,
-
-    @ColumnInfo(name = "message")
-    val message: String,
-
-    @ColumnInfo(name = "type")
-    val type: String,
-
-    @ColumnInfo(name = "customer_id")
-    val customerId: Long? = null,
-
-    @ColumnInfo(name = "is_read")
-    val isRead: Boolean = false,
+    @ColumnInfo(name = "transaction_id")
+    val transactionId: Long,
 
     @ColumnInfo(name = "created_at")
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+
+    @ColumnInfo(name = "read_at")
+    val readAt: Long? = null
 )
 
 fun NotificationEntity.toDomain(): AppNotification = AppNotification(
     id = id,
-    title = title,
-    message = message,
-    type = type,
-    customerId = customerId,
-    isRead = isRead,
-    createdAt = createdAt
+    transactionId = transactionId,
+    createdAt = createdAt,
+    readAt = readAt
 )
 
 fun AppNotification.toEntity(): NotificationEntity = NotificationEntity(
     id = id,
-    title = title,
-    message = message,
-    type = type,
-    customerId = customerId,
-    isRead = isRead,
-    createdAt = createdAt
+    transactionId = transactionId,
+    createdAt = createdAt,
+    readAt = readAt
 )

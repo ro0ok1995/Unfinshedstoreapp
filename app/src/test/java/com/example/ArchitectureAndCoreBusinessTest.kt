@@ -238,4 +238,251 @@ class ArchitectureAndCoreBusinessTest {
         assertTrue(ProductValidator.validate(productWithImage).isValid)
         assertEquals("/data/user/0/com.example/files/product_images/product_123.jpg", productWithImage.imagePath)
     }
+
+    @Test
+    fun testPartialPurchaseDebtCalculation() {
+        // Scenario: Total order is 100 ₪. Customer pays 40 ₪ in cash immediately.
+        // The purchase creates a CREDIT_PURCHASE of 100 ₪ and a linked PAYMENT of 40 ₪.
+        // DebtEngine must compute net outstanding debt = 60 ₪ (100 - 40).
+        val initialDebtTx = Transaction(
+            id = 1,
+            customerId = 20,
+            type = TransactionType.CREDIT_PURCHASE,
+            totalAmount = Money.fromShekels(50.0),
+            status = TransactionStatus.COMPLETED
+        )
+
+        val partialPurchaseCreditTx = Transaction(
+            id = 2,
+            customerId = 20,
+            type = TransactionType.CREDIT_PURCHASE,
+            totalAmount = Money.fromShekels(100.0),
+            status = TransactionStatus.COMPLETED
+        )
+
+        val partialPurchaseCashPaymentTx = Transaction(
+            id = 3,
+            customerId = 20,
+            type = TransactionType.PAYMENT,
+            totalAmount = Money.fromShekels(40.0),
+            status = TransactionStatus.COMPLETED,
+            note = "Partial cash down payment"
+        )
+
+        val allTransactions = listOf(initialDebtTx, partialPurchaseCreditTx, partialPurchaseCashPaymentTx)
+        val outstandingDebt = DebtEngine.calculateOutstandingDebt(allTransactions)
+
+        // Expected total debt: 50 + 100 - 40 = 110 ₪
+        assertEquals(11000L, outstandingDebt.minorUnits)
+        assertEquals(110.0, outstandingDebt.shekels, 0.0001)
+
+        // Net added debt from the partial purchase alone:
+        val netPurchaseDebt = partialPurchaseCreditTx.totalAmount - partialPurchaseCashPaymentTx.totalAmount
+        assertEquals(6000L, netPurchaseDebt.minorUnits)
+        assertEquals(60.0, netPurchaseDebt.shekels, 0.0001)
+    }
+
+    @Test
+    fun testPartialPurchaseValidation() {
+        val totalAmount = Money.fromShekels(100.0)
+
+        // Partial payment must be > 0
+        val zeroCash = Money.ZERO
+        val isZeroValid = zeroCash.isPositive() && zeroCash < totalAmount
+        assertFalse(isZeroValid)
+
+        // Partial payment cannot equal total (that would be FULL_CASH)
+        val fullCash = Money.fromShekels(100.0)
+        val isFullValidAsPartial = fullCash.isPositive() && fullCash < totalAmount
+        assertFalse(isFullValidAsPartial)
+
+        // Partial payment cannot exceed total
+        val excessCash = Money.fromShekels(120.0)
+        val isExcessValid = excessCash.isPositive() && excessCash < totalAmount
+        assertFalse(isExcessValid)
+
+        // Valid partial payment (e.g. 40 ₪ out of 100 ₪)
+        val validPartial = Money.fromShekels(40.0)
+        val isValid = validPartial.isPositive() && validPartial < totalAmount
+        assertTrue(isValid)
+        assertEquals(6000L, (totalAmount - validPartial).minorUnits)
+    }
+
+    @Test
+    fun testQuickPaymentReducesDebtAndCalculatesRemainingBalance() {
+        val currentDebt = Money.fromShekels(200.0)
+
+        // 1. Partial quick payment of 80 ₪
+        val payment1 = Money.fromShekels(80.0)
+        val val1 = DebtEngine.validatePaymentAmount(payment1, currentDebt)
+        assertTrue(val1.isValid)
+        val remaining1 = currentDebt - payment1
+        assertEquals(12000L, remaining1.minorUnits)
+        assertEquals(120.0, remaining1.shekels, 0.0001)
+
+        // 2. Full "Pay All" quick payment of 200 ₪
+        val paymentFull = currentDebt
+        val valFull = DebtEngine.validatePaymentAmount(paymentFull, currentDebt)
+        assertTrue(valFull.isValid)
+        val remainingFull = currentDebt - paymentFull
+        assertEquals(0L, remainingFull.minorUnits)
+        assertEquals(Money.ZERO, remainingFull)
+
+        // 3. Excess payment of 200.01 ₪ is blocked
+        val paymentExcess = Money.fromShekels(200.01)
+        val valExcess = DebtEngine.validatePaymentAmount(paymentExcess, currentDebt)
+        assertFalse(valExcess.isValid)
+        assertTrue(valExcess is PaymentValidationResult.ExceedsDebt)
+    }
+
+    @Test
+    fun testPhase5AnalysisMetricsCalculation() {
+        val txs = listOf(
+            Transaction(
+                id = 1,
+                customerId = 1,
+                type = TransactionType.CASH_PURCHASE,
+                totalAmount = Money.fromShekels(100.0),
+                status = TransactionStatus.COMPLETED
+            ),
+            Transaction(
+                id = 2,
+                customerId = 1,
+                type = TransactionType.CREDIT_PURCHASE,
+                totalAmount = Money.fromShekels(200.0),
+                status = TransactionStatus.COMPLETED
+            ),
+            Transaction(
+                id = 3,
+                customerId = 1,
+                type = TransactionType.PAYMENT,
+                totalAmount = Money.fromShekels(150.0),
+                status = TransactionStatus.COMPLETED
+            ),
+            Transaction(
+                id = 4,
+                customerId = 1,
+                type = TransactionType.CREDIT_PURCHASE,
+                totalAmount = Money.fromShekels(50.0),
+                status = TransactionStatus.CANCELLED
+            )
+        )
+
+        val metrics = DebtEngine.calculateAnalysisMetrics(
+            transactionsInPeriod = txs,
+            totalOutstandingDebt = Money.fromShekels(50.0),
+            totalCustomersCount = 5,
+            activeCustomersCount = 1
+        )
+
+        // Total sales = 100 (cash) + 200 (credit) = 300 ₪
+        assertEquals(30000L, metrics.totalSales.minorUnits)
+        // Cash sales = 100 ₪
+        assertEquals(10000L, metrics.cashSales.minorUnits)
+        // Credit sales = 200 ₪
+        assertEquals(20000L, metrics.creditSales.minorUnits)
+        // Payments collected = 150 ₪
+        assertEquals(15000L, metrics.paymentsCollected.minorUnits)
+        // Total Volume = 100 + 200 + 150 = 450 ₪
+        assertEquals(45000L, metrics.totalVolume.minorUnits)
+        // Completed transactions count = 3 (cancelled is excluded from completed)
+        assertEquals(3, metrics.totalTransactionsCount)
+        assertEquals(1, metrics.cashSalesCount)
+        assertEquals(1, metrics.creditSalesCount)
+        assertEquals(1, metrics.paymentsCount)
+
+        // Collection rate = (150 / 300) * 100 = 50.0%
+        assertEquals(50.0f, metrics.collectionRate, 0.01f)
+    }
+
+    @Test
+    fun testPhase5PeriodFilteringBounds() {
+        val (allStart, allEnd) = DebtEngine.getPeriodBounds(com.example.core.business.AnalysisPeriod.ALL_TIME)
+        assertEquals(0L, allStart)
+        assertEquals(Long.MAX_VALUE, allEnd)
+
+        val customStart = 1700000000000L
+        val customEnd = 1700086400000L
+        val (cStart, cEnd) = DebtEngine.getPeriodBounds(
+            com.example.core.business.AnalysisPeriod.CUSTOM,
+            customStart,
+            customEnd
+        )
+        assertEquals(customStart, cStart)
+        assertEquals(customEnd, cEnd)
+
+        val (todayStart, todayEnd) = DebtEngine.getPeriodBounds(com.example.core.business.AnalysisPeriod.TODAY)
+        assertTrue(todayStart <= System.currentTimeMillis())
+        assertTrue(todayEnd >= System.currentTimeMillis())
+        assertTrue(todayEnd > todayStart)
+    }
+
+    @Test
+    fun testPhase5RunningBalancesChronologicalCalculation() {
+        val txs = listOf(
+            Transaction(
+                id = 1,
+                customerId = 1,
+                type = TransactionType.CREDIT_PURCHASE,
+                totalAmount = Money.fromShekels(100.0),
+                createdAt = 1000L,
+                status = TransactionStatus.COMPLETED
+            ),
+            Transaction(
+                id = 2,
+                customerId = 1,
+                type = TransactionType.CREDIT_PURCHASE,
+                totalAmount = Money.fromShekels(50.0),
+                createdAt = 2000L,
+                status = TransactionStatus.COMPLETED
+            ),
+            Transaction(
+                id = 3,
+                customerId = 1,
+                type = TransactionType.CASH_PURCHASE,
+                totalAmount = Money.fromShekels(30.0),
+                createdAt = 3000L,
+                status = TransactionStatus.COMPLETED
+            ),
+            Transaction(
+                id = 4,
+                customerId = 1,
+                type = TransactionType.PAYMENT,
+                totalAmount = Money.fromShekels(70.0),
+                createdAt = 4000L,
+                status = TransactionStatus.COMPLETED
+            ),
+            Transaction(
+                id = 5,
+                customerId = 1,
+                type = TransactionType.CREDIT_PURCHASE,
+                totalAmount = Money.fromShekels(80.0),
+                createdAt = 5000L,
+                status = TransactionStatus.CANCELLED
+            ),
+            Transaction(
+                id = 6,
+                customerId = 1,
+                type = TransactionType.PAYMENT,
+                totalAmount = Money.fromShekels(80.0),
+                createdAt = 6000L,
+                status = TransactionStatus.COMPLETED
+            )
+        )
+
+        val balances = DebtEngine.calculateRunningBalances(txs)
+
+        // Tx 1: debt 100 ₪
+        assertEquals(10000L, balances[1L]?.minorUnits)
+        // Tx 2: debt 100 + 50 = 150 ₪
+        assertEquals(15000L, balances[2L]?.minorUnits)
+        // Tx 3: cash purchase -> debt remains 150 ₪
+        assertEquals(15000L, balances[3L]?.minorUnits)
+        // Tx 4: payment 70 ₪ -> debt = 150 - 70 = 80 ₪
+        assertEquals(8000L, balances[4L]?.minorUnits)
+        // Tx 5: cancelled -> debt remains 80 ₪
+        assertEquals(8000L, balances[5L]?.minorUnits)
+        // Tx 6: payment 80 ₪ -> debt = 80 - 80 = 0 ₪
+        assertEquals(0L, balances[6L]?.minorUnits)
+    }
 }
